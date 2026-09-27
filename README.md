@@ -26,7 +26,6 @@ A minimal, easy-to-understand MCP (Model Context Protocol) server for Claude Des
 - **requirements.txt** - Python dependencies (`mcp[cli]`)
 - **cosmin.json** - Sample data file exposed as a resource
 - **memory.json** - Auto-created when you save memories
-- **SETUP.md** - Detailed setup and debugging
 - **test_tools.py** - Quick tool verification script
 
 ## 🚀 Setup & Running
@@ -47,6 +46,8 @@ source .venv/bin/activate
 python3 server.py
 ```
 Keep this running in a terminal. Claude Desktop will connect automatically.
+Run manually it looks like it hangs — that's correct, it's waiting for stdin
+from an MCP client.
 
 **Option 2: For Development & Testing (with Inspector)**
 ```bash
@@ -63,7 +64,11 @@ mcp run server.py
 
 ### Configure Claude Desktop
 
-Edit: `~/Library/Application Support/Claude/claude_desktop_config.json`
+Edit the config file (create it if it doesn't exist):
+
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Linux: `~/.config/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
 {
@@ -202,7 +207,7 @@ Want to add more resources? Edit `server.py`:
 
 **Dependencies not found?**
 - Ensure you're using the venv: `source .venv/bin/activate`
-- Or reinstall: `uv pip install mcp`
+- Or reinstall: `uv pip install -r requirements.txt`
 
 ## 📚 Learning Resources
 

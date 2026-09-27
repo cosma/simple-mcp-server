@@ -46,7 +46,7 @@ def test_tools():
 
     print("\n" + "="*50)
     print("✓ All tools working!\n")
-    print("Next step: Configure Claude Desktop as shown in QUICKSTART.md")
+    print("Next step: Configure Claude Desktop as shown in README.md")
 
 if __name__ == "__main__":
     test_tools()
