@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+memory.json
+.DS_Store
+cert.pem
+key.pem
