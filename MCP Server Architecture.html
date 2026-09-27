@@ -1,0 +1,145 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1"><style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP Server Architecture</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        svg {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            max-width: 100%;
+            height: auto;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-top: 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>MCP Server Architecture</h1>
+    <svg viewBox="0 0 1000 600" xmlns="http://www.w3.org/2000/svg">
+        <!-- Background -->
+        <defs>
+            <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#f8f9fa;stop-opacity:1" />
+                <stop offset="100%" style="stop-color:#ffffff;stop-opacity:1" />
+            </linearGradient>
+        </defs>
+
+        <!-- Title sections -->
+        <text x="500" y="30" font-size="24" font-weight="bold" text-anchor="middle" fill="#333">MCP Server Data Flow</text>
+
+        <!-- Left side: Claude Desktop -->
+        <rect x="20" y="80" width="200" height="120" fill="#E3F2FD" stroke="#1976D2" stroke-width="2" rx="8"/>
+        <text x="120" y="110" font-size="16" font-weight="bold" text-anchor="middle" fill="#1976D2">Claude Desktop</text>
+        <text x="120" y="135" font-size="12" text-anchor="middle" fill="#333">Sends tool calls</text>
+        <text x="120" y="155" font-size="12" text-anchor="middle" fill="#333">Receives results</text>
+        <text x="120" y="175" font-size="12" text-anchor="middle" fill="#666" font-style="italic">stdio protocol</text>
+
+        <!-- Arrow 1: Claude -> Server -->
+        <path d="M 220 140 L 280 140" stroke="#666" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
+        <text x="250" y="130" font-size="11" text-anchor="middle" fill="#666">requests</text>
+
+        <!-- Center: MCP Server -->
+        <rect x="280" y="60" width="240" height="160" fill="#F3E5F5" stroke="#7B1FA2" stroke-width="2" rx="8"/>
+        <text x="400" y="85" font-size="16" font-weight="bold" text-anchor="middle" fill="#7B1FA2">MCP Server</text>
+        <text x="400" y="110" font-size="12" text-anchor="middle" fill="#333">server.py</text>
+
+        <!-- Tools inside server -->
+        <rect x="295" y="125" width="110" height="40" fill="#FFFFFF" stroke="#7B1FA2" stroke-width="1" rx="4"/>
+        <text x="350" y="145" font-size="11" font-weight="bold" text-anchor="middle" fill="#333">list_tools()</text>
+        <text x="350" y="160" font-size="10" text-anchor="middle" fill="#666">4 tools</text>
+
+        <rect x="410" y="125" width="110" height="40" fill="#FFFFFF" stroke="#7B1FA2" stroke-width="1" rx="4"/>
+        <text x="465" y="145" font-size="11" font-weight="bold" text-anchor="middle" fill="#333">call_tool()</text>
+        <text x="465" y="160" font-size="10" text-anchor="middle" fill="#666">dispatcher</text>
+
+        <!-- Arrow 2: Server -> Claude -->
+        <path d="M 280 200 L 220 200" stroke="#666" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
+        <text x="250" y="220" font-size="11" text-anchor="middle" fill="#666">results</text>
+
+        <!-- Right side: Tools -->
+        <rect x="600" y="60" width="380" height="160" fill="#E8F5E9" stroke="#388E3C" stroke-width="2" rx="8"/>
+        <text x="790" y="85" font-size="16" font-weight="bold" text-anchor="middle" fill="#388E3C">4 Tool Handlers</text>
+
+        <!-- Tool boxes -->
+        <rect x="615" y="105" width="85" height="100" fill="#FFFFFF" stroke="#388E3C" stroke-width="1" rx="4"/>
+        <text x="657.5" y="125" font-size="11" font-weight="bold" text-anchor="middle" fill="#333">save_memory</text>
+        <text x="657.5" y="145" font-size="9" text-anchor="middle" fill="#666">Saves key-value</text>
+        <text x="657.5" y="160" font-size="9" text-anchor="middle" fill="#666">to memory.json</text>
+        <text x="657.5" y="195" font-size="8" text-anchor="middle" fill="#1976D2" font-style="italic">Persistent</text>
+
+        <rect x="710" y="105" width="85" height="100" fill="#FFFFFF" stroke="#388E3C" stroke-width="1" rx="4"/>
+        <text x="752.5" y="125" font-size="11" font-weight="bold" text-anchor="middle" fill="#333">load_memory</text>
+        <text x="752.5" y="145" font-size="9" text-anchor="middle" fill="#666">Reads from</text>
+        <text x="752.5" y="160" font-size="9" text-anchor="middle" fill="#666">memory.json</text>
+        <text x="752.5" y="195" font-size="8" text-anchor="middle" fill="#1976D2" font-style="italic">Persistent</text>
+
+        <rect x="805" y="105" width="85" height="100" fill="#FFFFFF" stroke="#388E3C" stroke-width="1" rx="4"/>
+        <text x="847.5" y="125" font-size="11" font-weight="bold" text-anchor="middle" fill="#333">get_time</text>
+        <text x="847.5" y="145" font-size="9" text-anchor="middle" fill="#666">Returns current</text>
+        <text x="847.5" y="160" font-size="9" text-anchor="middle" fill="#666">ISO timestamp</text>
+        <text x="847.5" y="195" font-size="8" text-anchor="middle" fill="#FF6F00" font-style="italic">Stateless</text>
+
+        <rect x="900" y="105" width="70" height="100" fill="#FFFFFF" stroke="#388E3C" stroke-width="1" rx="4"/>
+        <text x="935" y="125" font-size="11" font-weight="bold" text-anchor="middle" fill="#333">calculate</text>
+        <text x="935" y="145" font-size="9" text-anchor="middle" fill="#666">Math ops</text>
+        <text x="935" y="160" font-size="9" text-anchor="middle" fill="#666">add/sub/mul/div</text>
+        <text x="935" y="195" font-size="8" text-anchor="middle" fill="#FF6F00" font-style="italic">Stateless</text>
+
+        <!-- Arrow from server to tools -->
+        <path d="M 520 140 L 600 140" stroke="#666" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
+        <text x="560" y="130" font-size="11" text-anchor="middle" fill="#666">executes</text>
+
+        <!-- Bottom: Memory File -->
+        <rect x="280" y="280" width="700" height="100" fill="#FFF3E0" stroke="#F57C00" stroke-width="2" rx="8"/>
+        <text x="630" y="305" font-size="14" font-weight="bold" text-anchor="middle" fill="#F57C00">Persistent Storage</text>
+
+        <rect x="300" y="325" width="330" height="35" fill="#FFFFFF" stroke="#F57C00" stroke-width="1" rx="4"/>
+        <text x="465" y="352" font-size="11" font-weight="bold" text-anchor="middle" fill="#333">memory.json</text>
+        <text x="465" y="355" font-size="9" text-anchor="middle" fill="#666">(project root)</text>
+
+        <rect x="650" y="325" width="330" height="35" fill="#FFFFFF" stroke="#F57C00" stroke-width="1" rx="4"/>
+        <text x="815" y="352" font-size="11" font-weight="bold" text-anchor="middle" fill="#333">Data Format</text>
+        <text x="815" y="355" font-size="9" text-anchor="middle" fill="#666">{"key": "value", ...}</text>
+
+        <!-- Arrows from tools to memory -->
+        <path d="M 657.5 205 L 400 325" stroke="#F57C00" stroke-width="1.5" fill="none" stroke-dasharray="5,5"/>
+        <path d="M 752.5 205 L 465 325" stroke="#F57C00" stroke-width="1.5" fill="none" stroke-dasharray="5,5"/>
+
+        <!-- Flow numbers -->
+        <circle cx="240" cy="140" r="12" fill="#1976D2"/>
+        <text x="240" y="146" font-size="12" font-weight="bold" text-anchor="middle" fill="white">1</text>
+
+        <circle cx="560" cy="140" r="12" fill="#388E3C"/>
+        <text x="560" y="146" font-size="12" font-weight="bold" text-anchor="middle" fill="white">2</text>
+
+        <circle cx="240" cy="200" r="12" fill="#1976D2"/>
+        <text x="240" y="206" font-size="12" font-weight="bold" text-anchor="middle" fill="white">3</text>
+
+        <!-- Legend -->
+        <text x="20" y="450" font-size="12" font-weight="bold" fill="#333">Flow:</text>
+        <text x="20" y="475" font-size="11" fill="#333">① Claude sends "Save memory: X=Y" → ② Server matches tool & executes → ③ Returns result to Claude</text>
+        <text x="20" y="500" font-size="11" fill="#333">💾 save_memory & load_memory persist to memory.json • ⚡ get_time & calculate are stateless</text>
+
+        <!-- Arrow marker definition -->
+        <defs>
+            <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                <polygon points="0 0, 10 3, 0 6" fill="#666"/>
+            </marker>
+        </defs>
+    </svg>
+</body>
+</html>
+</body></html>

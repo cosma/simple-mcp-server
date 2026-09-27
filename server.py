@@ -6,7 +6,7 @@ from pathlib import Path
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent, ListToolsResult, CallToolResult, ListToolsRequest, CallToolRequestParams
+from mcp.types import TextContent
 
 MEMORY_FILE = Path(__file__).parent / "memory.json"
 
@@ -40,28 +40,124 @@ async def calculate_tool(args):
     r = a + b if op == "add" else a - b if op == "subtract" else a * b if op == "multiply" else a / b
     return f"{a} {op} {b} = {r}"
 
-# Handlers - signature: (ctx, params)
-async def list_tools_handler(ctx, params):
-    return ListToolsResult(tools=[
-        Tool(name="save_memory", description="Save key-value to memory", inputSchema={"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}}, "required": ["key", "value"]}),
-        Tool(name="load_memory", description="Load saved memories", inputSchema={"type": "object"}),
-        Tool(name="get_time", description="Get current time", inputSchema={"type": "object"}),
-        Tool(name="calculate", description="Do math operations", inputSchema={"type": "object", "properties": {"a": {"type": "number"}, "b": {"type": "number"}, "operation": {"type": "string", "enum": ["add", "subtract", "multiply", "divide"]}}, "required": ["a", "b", "operation"]}),
-    ])
+# Tool handlers
+@server.list_tools()
+async def list_tools():
+    return [
+        {
+            "name": "save_memory",
+            "description": "Save key-value to memory",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string"},
+                    "value": {"type": "string"}
+                },
+                "required": ["key", "value"]
+            }
+        },
+        {
+            "name": "load_memory",
+            "description": "Load saved memories",
+            "inputSchema": {"type": "object"}
+        },
+        {
+            "name": "get_time",
+            "description": "Get current time",
+            "inputSchema": {"type": "object"}
+        },
+        {
+            "name": "calculate",
+            "description": "Do math operations",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "a": {"type": "number"},
+                    "b": {"type": "number"},
+                    "operation": {
+                        "type": "string",
+                        "enum": ["add", "subtract", "multiply", "divide"]
+                    }
+                },
+                "required": ["a", "b", "operation"]
+            }
+        },
+    ]
 
-async def call_tool_handler(ctx, params):
+@server.call_tool()
+async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     tools_impl = {
         "save_memory": save_memory_tool,
         "load_memory": load_memory_tool,
         "get_time": get_time_tool,
         "calculate": calculate_tool,
     }
-    result = await tools_impl[params.name](params.arguments or {})
-    return CallToolResult(content=[TextContent(type="text", text=result)])
+    result = await tools_impl[name](arguments or {})
+    return [TextContent(type="text", text=result)]
 
-# Register handlers
-server.add_request_handler("tools/list", ListToolsRequest, list_tools_handler)
-server.add_request_handler("tools/call", CallToolRequestParams, call_tool_handler)
+# Resource handlers
+@server.list_resources()
+async def list_resources():
+    return [
+        {
+            "uri": "memory://data",
+            "name": "Memory Store",
+            "description": "Current memory.json file with all saved key-value pairs",
+            "mimeType": "application/json"
+        },
+        {
+            "uri": "file://memory.json",
+            "name": "Memory File",
+            "description": "Direct path to memory.json in project root",
+            "mimeType": "application/json"
+        },
+        {
+            "uri": "file://cosmin.json",
+            "name": "Cosmin Profile",
+            "description": "User profile and information",
+            "mimeType": "application/json"
+        },
+        {
+            "uri": "status://server",
+            "name": "Server Status",
+            "description": "Current server information and stats",
+            "mimeType": "text/plain"
+        },
+    ]
+
+@server.read_resource()
+async def read_resource(uri) -> str:
+    key = str(uri).rstrip("/")
+
+    if key in ("memory://data", "file://memory.json"):
+        return json.dumps(load_memory(), indent=2)
+
+    elif key == "file://cosmin.json":
+        cosmin_file = Path(__file__).parent / "cosmin.json"
+        return cosmin_file.read_text() if cosmin_file.exists() else "{}"
+
+    elif key == "status://server":
+        mem = load_memory()
+        return f"""MCP Server Status
+================
+Server: simple-mcp
+Status: Running
+Protocol: stdio
+
+Memory Stats:
+- Entries: {len(mem)}
+- Keys: {', '.join(mem.keys()) if mem else 'none'}
+- File: {MEMORY_FILE}
+
+Tools Available: 4
+1. save_memory   (persistent)
+2. load_memory   (persistent)
+3. get_time      (stateless)
+4. calculate     (stateless)
+"""
+
+    else:
+        return f"Unknown resource: {key}"
 
 async def main():
     async with stdio_server() as (reader, writer):

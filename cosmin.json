@@ -1,0 +1,7 @@
+{
+  "name": "Cosmin",
+  "role": "Developer",
+  "skills": ["Python", "MCP", "JavaScript"],
+  "projects": ["MCP Server", "AI Tools"],
+  "bio": "Building simple MCP servers with Claude"
+}
