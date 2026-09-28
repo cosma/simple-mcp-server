@@ -2,7 +2,7 @@
 
 A minimal, easy-to-understand MCP (Model Context Protocol) server for Claude Desktop with **tools** and **resources**.
 
-## 📋 Tools (4 operations)
+## 📋 Tools (5 operations)
 
 | Tool | Purpose | Persistent? |
 |------|---------|------------|
@@ -10,6 +10,7 @@ A minimal, easy-to-understand MCP (Model Context Protocol) server for Claude Des
 | **load_memory** | Load all saved memories | ✅ Yes (from JSON file) |
 | **get_time** | Get current date/time | ❌ No |
 | **calculate** | Math operations (add/subtract/multiply/divide) | ❌ No |
+| **get_weather** | Current weather for a city (via wttr.in) | ❌ No |
 
 ## 📁 Resources (4 data sources)
 
@@ -61,6 +62,10 @@ Opens interactive MCP Inspector at `http://localhost:5173` - test tools & resour
 source .venv/bin/activate
 mcp run server.py
 ```
+
+Keep this running in a terminal. Claude Desktop will connect automatically.
+Run manually it looks like it hangs — that's correct, it's waiting for stdin
+from an MCP client.
 
 ### Configure Claude Desktop
 
@@ -146,7 +151,7 @@ Workflow:
 ```
 
 **Key Differences:**
-- **Tools** (4): Execute actions - save data, calculate, get time
+- **Tools** (5): Execute actions - save data, calculate, get time, fetch weather
 - **Resources** (4): Read data - memory.json, cosmin.json, server status
 
 **Best Practices:**
@@ -171,11 +176,12 @@ Claude Desktop
    (stdio)
       ↓
   MCP Server (server.py)
-      ├── Tools (4)
+      ├── Tools (5)
       │   ├── save_memory → memory.json ✅ persistent
       │   ├── load_memory ← memory.json ✅ persistent
       │   ├── get_time → system clock ⚡ stateless
-      │   └── calculate → compute ⚡ stateless
+      │   ├── calculate → compute ⚡ stateless
+      │   └── get_weather → wttr.in 🌐 network
       │
       └── Resources (4)
           ├── memory://data → memory.json ✅ persistent

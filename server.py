@@ -4,6 +4,8 @@ import asyncio
 from datetime import datetime
 from pathlib import Path
 
+import httpx
+
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent
@@ -39,6 +41,27 @@ async def calculate_tool(args):
     op = args["operation"]
     r = a + b if op == "add" else a - b if op == "subtract" else a * b if op == "multiply" else a / b
     return f"{a} {op} {b} = {r}"
+
+async def get_weather_tool(args):
+    city = args["city"]
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(f"https://wttr.in/{city}", params={"format": "j1"})
+        resp.raise_for_status()
+        data = resp.json()
+    except httpx.HTTPStatusError:
+        return f"Could not find weather for '{city}'."
+    except httpx.RequestError as e:
+        return f"Weather service unreachable: {e}"
+
+    now = data["current_condition"][0]
+    area = data["nearest_area"][0]
+    place = f"{area['areaName'][0]['value']}, {area['country'][0]['value']}"
+    return (
+        f"{place}: {now['weatherDesc'][0]['value'].strip()}, "
+        f"{now['temp_C']}C (feels like {now['FeelsLikeC']}C), "
+        f"humidity {now['humidity']}%, wind {now['windspeedKmph']} km/h"
+    )
 
 # Tool handlers
 @server.list_tools()
@@ -82,6 +105,20 @@ async def list_tools():
                 "required": ["a", "b", "operation"]
             }
         },
+        {
+            "name": "get_weather",
+            "description": "Get the current weather for a city",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "city": {
+                        "type": "string",
+                        "description": "City name, e.g. Bucharest or London"
+                    }
+                },
+                "required": ["city"]
+            }
+        },
     ]
 
 @server.call_tool()
@@ -91,6 +128,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         "load_memory": load_memory_tool,
         "get_time": get_time_tool,
         "calculate": calculate_tool,
+        "get_weather": get_weather_tool,
     }
     result = await tools_impl[name](arguments or {})
     return [TextContent(type="text", text=result)]
@@ -149,11 +187,12 @@ Memory Stats:
 - Keys: {', '.join(mem.keys()) if mem else 'none'}
 - File: {MEMORY_FILE}
 
-Tools Available: 4
+Tools Available: 5
 1. save_memory   (persistent)
 2. load_memory   (persistent)
 3. get_time      (stateless)
 4. calculate     (stateless)
+5. get_weather   (network)
 """
 
     else:
