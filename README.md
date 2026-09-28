@@ -1,6 +1,6 @@
 # Simple MCP Server
 
-A minimal, easy-to-understand MCP (Model Context Protocol) server for Claude Desktop with **tools** and **resources**.
+A minimal, easy-to-understand [MCP](https://modelcontextprotocol.io/) (Model Context Protocol)server for Claude Desktop with **tools** and **resources**.
 
 ## 📋 Tools (5 operations)
 
@@ -57,15 +57,7 @@ mcp dev server.py
 ```
 Opens interactive MCP Inspector at `http://localhost:5173` - test tools & resources live
 
-**Option 3: Just run the server**
-```bash
-source .venv/bin/activate
-mcp run server.py
-```
 
-Keep this running in a terminal. Claude Desktop will connect automatically.
-Run manually it looks like it hangs — that's correct, it's waiting for stdin
-from an MCP client.
 
 ### Configure Claude Desktop
 
@@ -78,7 +70,7 @@ Edit the config file (create it if it doesn't exist):
 ```json
 {
   "mcpServers": {
-    "simple-mcp": {
+    "simple-mcp-server": {
       "command": "/Users/cosmin/Projects/MCP/simpleexample/.venv/bin/python",
       "args": ["/Users/cosmin/Projects/MCP/simpleexample/server.py"]
     }

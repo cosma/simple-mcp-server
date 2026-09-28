@@ -21,7 +21,7 @@ def load_memory():
 def save_memory(data):
     MEMORY_FILE.write_text(json.dumps(data, indent=2))
 
-server = Server("simple-mcp")
+server = Server("simple-mcp-server")
 
 # Tool implementations
 async def save_memory_tool(args):
@@ -178,7 +178,7 @@ async def read_resource(uri) -> str:
         mem = load_memory()
         return f"""MCP Server Status
 ================
-Server: simple-mcp
+Server: simple-mcp-server
 Status: Running
 Protocol: stdio
 
