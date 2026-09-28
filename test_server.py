@@ -17,6 +17,8 @@ from server import (
     read_resource,
     list_tools,
     list_resources,
+    list_prompts,
+    get_prompt,
     load_memory,
     save_memory,
     MEMORY_FILE,
@@ -295,6 +297,130 @@ class TestListTools:
         calc_tool = next(t for t in tools if t["name"] == "calculate")
         operations = calc_tool["inputSchema"]["properties"]["operation"]["enum"]
         assert set(operations) == {"add", "subtract", "multiply", "divide"}
+
+
+# ============================================================================
+# PROMPT ADVERTISEMENT AND CONTENT TESTS
+# ============================================================================
+
+class TestListPrompts:
+    """Test prompt template advertisement."""
+
+    @pytest.mark.asyncio
+    async def test_list_prompts_count(self):
+        """Check that correct number of prompts are advertised."""
+        prompts = await list_prompts()
+        assert len(prompts) == 2
+
+    @pytest.mark.asyncio
+    async def test_list_prompts_names(self):
+        """Check that all expected prompts are present."""
+        prompts = await list_prompts()
+        names = [p.name for p in prompts]
+        assert "weather_activity_planner" in names
+        assert "weather_alert_explainer" in names
+
+    @pytest.mark.asyncio
+    async def test_prompts_have_descriptions(self):
+        """Check that all prompts have descriptions."""
+        prompts = await list_prompts()
+        for prompt in prompts:
+            assert prompt.description
+            assert len(prompt.description) > 0
+
+    @pytest.mark.asyncio
+    async def test_prompts_have_arguments(self):
+        """Check that all prompts have arguments defined."""
+        prompts = await list_prompts()
+        for prompt in prompts:
+            assert isinstance(prompt.arguments, list)
+
+    @pytest.mark.asyncio
+    async def test_weather_activity_planner_arguments(self):
+        """Check weather_activity_planner arguments."""
+        prompts = await list_prompts()
+        planner = next(p for p in prompts if p.name == "weather_activity_planner")
+        arg_names = [a.name for a in planner.arguments]
+        assert "location" in arg_names
+        assert "activity_type" in arg_names
+        assert "time_horizon" in arg_names
+
+    @pytest.mark.asyncio
+    async def test_weather_alert_explainer_arguments(self):
+        """Check weather_alert_explainer arguments."""
+        prompts = await list_prompts()
+        explainer = next(p for p in prompts if p.name == "weather_alert_explainer")
+        arg_names = [a.name for a in explainer.arguments]
+        assert "alert_type" in arg_names
+        assert "region" in arg_names
+
+
+class TestGetPrompt:
+    """Test prompt template content generation."""
+
+    @pytest.mark.asyncio
+    async def test_get_weather_activity_planner(self):
+        """Get weather_activity_planner prompt with arguments."""
+        result = await get_prompt("weather_activity_planner", {
+            "location": "New York",
+            "activity_type": "hiking",
+            "time_horizon": "this weekend"
+        })
+        assert len(result.messages) > 0
+        content = result.messages[0].content.text
+        assert "hiking" in content
+        assert "New York" in content
+        assert "this weekend" in content
+
+    @pytest.mark.asyncio
+    async def test_get_weather_activity_planner_minimal(self):
+        """Get weather_activity_planner with only required arguments."""
+        result = await get_prompt("weather_activity_planner", {
+            "location": "London",
+            "activity_type": "picnic"
+        })
+        content = result.messages[0].content.text
+        assert "picnic" in content
+        assert "London" in content
+
+    @pytest.mark.asyncio
+    async def test_get_weather_alert_explainer(self):
+        """Get weather_alert_explainer prompt with arguments."""
+        result = await get_prompt("weather_alert_explainer", {
+            "alert_type": "severe thunderstorm",
+            "region": "Texas"
+        })
+        assert len(result.messages) > 0
+        content = result.messages[0].content.text
+        assert "severe thunderstorm" in content
+        assert "Texas" in content
+
+    @pytest.mark.asyncio
+    async def test_get_unknown_prompt(self):
+        """Get a prompt that doesn't exist."""
+        result = await get_prompt("unknown_prompt", {})
+        assert len(result.messages) > 0
+        assert "not found" in result.messages[0].content.text
+
+    @pytest.mark.asyncio
+    async def test_prompt_result_serializes_for_wire(self):
+        """Rendered prompts must validate as MCP GetPromptResult (regression guard)."""
+        from mcp.types import GetPromptResult
+
+        result = await get_prompt("weather_activity_planner", {
+            "location": "Berlin",
+            "activity_type": "biking",
+        })
+        # Round-trip through the wire format the client actually receives.
+        GetPromptResult.model_validate(result.model_dump(by_alias=True, mode="json"))
+
+    @pytest.mark.asyncio
+    async def test_get_prompt_with_none_arguments(self):
+        """Get prompt when arguments is None."""
+        result = await get_prompt("weather_activity_planner", None)
+        # Should have default values
+        content = result.messages[0].content.text
+        assert "unknown location" in content or "outdoor activity" in content
 
 
 # ============================================================================

@@ -1,6 +1,6 @@
 # Simple MCP Server
 
-A minimal, easy-to-understand [MCP](https://modelcontextprotocol.io/) (Model Context Protocol)server for Claude Desktop with **tools** and **resources**.
+A minimal, easy-to-understand [MCP](https://modelcontextprotocol.io/) (Model Context Protocol) server for Claude Desktop with **tools**, **resources**, and **prompt templates**.
 
 ## 📋 Tools (5 operations)
 
@@ -20,12 +20,25 @@ A minimal, easy-to-understand [MCP](https://modelcontextprotocol.io/) (Model Con
 | **file://memory.json** | Direct access to memory.json file |
 | **status://server** | Server status and statistics |
 
-## 📁 Files
+## 🎯 Prompts (2 templates)
 
-- **server.py** - The MCP server implementation with tools & resources
+| Prompt | Purpose | Parameters |
+|--------|---------|------------|
+| **weather_activity_planner** | Plan outdoor activities based on weather | location, activity_type, time_horizon (optional) |
+| **weather_alert_explainer** | Explain weather alerts in simple terms | alert_type, region |
+
+## 📁 Files & Folders
+
+- **server.py** - Main MCP server implementation
 - **requirements.txt** - Python dependencies (`mcp[cli]`)
 - **memory.json** - Auto-created when you save memories
-- **test_tools.py** - Quick tool verification script
+- **/prompts/** - Prompt template definitions
+  - `weather_activity_planner.py` - Activity planning template
+  - `weather_alert_explainer.py` - Alert explanation template
+- **/resources/** - Resource implementations
+  - `memory_store.py` - Memory data resources
+  - `server_status.py` - Server status resource
+- **test_server.py** - Comprehensive test suite for tools, resources, and prompts
 
 ## 🚀 Setup & Running
 
@@ -113,7 +126,31 @@ Ask Claude to **view data**:
 → Lists all exposed resources
 ```
 
-### Tools + Resources Together 🚀
+### Testing Prompts (Templates)
+Ask Claude to **use prompt templates**:
+
+```
+"Help me plan a hiking trip to Colorado this weekend"
+→ Uses: weather_activity_planner prompt template
+→ Fills: location=Colorado, activity_type=hiking, time_horizon=this weekend
+→ Generates: Custom prompt for activity planning
+
+"Explain a severe thunderstorm alert for Texas"
+→ Uses: weather_alert_explainer prompt template
+→ Fills: alert_type=severe thunderstorm, region=Texas
+→ Generates: Custom prompt explaining the weather alert
+
+"What prompts are available?"
+→ Lists all available prompt templates and their parameters
+```
+
+**How Prompts Work:**
+- Prompts are **reusable templates** with parameters you fill in
+- Claude asks for parameter values when needed
+- Server generates a custom prompt with those values
+- The prompt is then used in the conversation
+
+### Tools + Resources + Prompts Together 🚀
 **The power of MCP:** Tools and resources work **together seamlessly**:
 
 ```
@@ -134,11 +171,13 @@ Workflow:
 **Key Differences:**
 - **Tools** (5): Execute actions - save data, calculate, get time, fetch weather
 - **Resources** (3): Read data - memory.json, server status
+- **Prompts** (2): Reusable templates with parameters - activity planning, alert explanations
 
 **Best Practices:**
 - Use **Tools** for: Creating, modifying, computing
 - Use **Resources** for: Viewing, inspecting, reading
-- Combine both for: Rich workflows (save → view → analyze)
+- Use **Prompts** for: Generating custom prompts with parameters
+- Combine all three for: Rich workflows (save → view → generate prompts)
 
 ## 💾 Memory Storage
 
@@ -164,24 +203,70 @@ Claude Desktop
       │   ├── calculate → compute ⚡ stateless
       │   └── get_weather → wttr.in 🌐 network
       │
-      └── Resources (3)
-          ├── memory://data → memory.json ✅ persistent
-          ├── file://memory.json → memory.json ✅ persistent
-          └── status://server → server stats ⚡ stateless
+      ├── Resources (3) — in /resources/
+      │   ├── memory://data → memory.json ✅ persistent
+      │   ├── file://memory.json → memory.json ✅ persistent
+      │   └── status://server → server stats ⚡ stateless
+      │
+      └── Prompts (2) — in /prompts/
+          ├── weather_activity_planner (location, activity_type, time_horizon)
+          └── weather_alert_explainer (alert_type, region)
 ```
 
 ## 🔧 Customization
 
-Want to add more tools? Edit `server.py`:
+### Adding Tools
+Edit `server.py`:
 1. Add tool implementation function
 2. Add Tool to `@server.list_tools()` function
 3. Add case to `@server.call_tool()` function
 4. Restart Claude Desktop
 
-Want to add more resources? Edit `server.py`:
-1. Add Resource to `@server.list_resources()` function
-2. Add case to `@server.read_resource()` function
-3. Restart Claude Desktop
+### Adding Resources
+Create new file in `/resources/`:
+1. Define resource metadata and read function
+2. Import in `/resources/__init__.py`
+3. Add to `list_resources()` in `server.py`
+4. Add case to `read_resource()` in `server.py`
+5. Restart Claude Desktop
+
+### Adding Prompts
+Create new file in `/prompts/`:
+1. Define prompt template with name, description, arguments
+2. Add a `render()` function that fills in parameters
+3. Import in `/prompts/__init__.py`
+4. Add to `list_prompts()` in `server.py`
+5. Add case to `get_prompt()` in `server.py`
+6. Restart Claude Desktop
+
+**Example prompt template** (`/prompts/my_template.py`):
+```python
+from mcp.types import GetPromptResult, Prompt, PromptArgument, PromptMessage, TextContent
+
+MY_TEMPLATE = Prompt(
+    name="my_template",
+    description="My custom template",
+    arguments=[
+        PromptArgument(name="param1", description="First param", required=True),
+        PromptArgument(name="param2", description="Second param", required=False),
+    ],
+)
+
+def render(param1: str, param2: str = "default") -> GetPromptResult:
+    return GetPromptResult(
+        description=f"Custom prompt with {param1}",
+        messages=[
+            PromptMessage(
+                role="user",
+                content=TextContent(type="text", text=f"Use {param1} and {param2}"),
+            )
+        ],
+    )
+```
+
+> ⚠️ **Use the typed MCP objects, not plain dicts.** A `PromptMessage`'s `content`
+> must be a `TextContent` object — a bare string fails validation and the client
+> reports *"Failed to attach prompt"* with no useful error in the logs.
 
 ## ❓ Troubleshooting
 

@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
 """
-Simple MCP Server with Tools and Resources
+Simple MCP Server with Tools, Resources, and Prompts
 
 ARCHITECTURE:
 - TOOLS (5): Functions that An MCP client can CALL to perform actions
   · save_memory, load_memory, get_time, calculate, get_weather
 
-- RESOURCES (4): Data that An MCP client can READ to inspect state
+- RESOURCES (3): Data that An MCP client can READ to inspect state
   · memory://data, file://memory.json, status://server
+  · Organized in /resources folder
+
+- PROMPTS (2): Reusable prompt templates with parameterized content
+  · weather_activity_planner, weather_alert_explainer
+  · Organized in /prompts folder
 
 FLOW:
 1. An MCP client connects to this server via stdio
-2. Server advertises what it can do (tools + resources)
-3. The MCP client asks: "call this tool" or "read this resource"
-4. Server executes and returns result
+2. Server advertises what it can do (tools + resources + prompts)
+3. The MCP client asks: "call this tool", "read this resource", or "get this prompt"
+4. Server executes/generates and returns result
 5. The client formats the result for the user
 """
 
@@ -26,10 +31,14 @@ import httpx
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import TextContent
+from mcp.types import GetPromptResult, PromptMessage, TextContent
+
+from prompts import weather_activity_planner, weather_alert_explainer
+from resources import memory_store, server_status
 
 # Persistent storage file for save_memory and load_memory tools
 MEMORY_FILE = Path(__file__).parent / "memory.json"
+
 
 # --- Helpers for persistent memory storage ---
 def load_memory():
@@ -38,6 +47,7 @@ def load_memory():
         content = MEMORY_FILE.read_text().strip()
         return json.loads(content) if content else {}
     return {}
+
 
 def save_memory(data):
     """Write dict to memory.json file."""
@@ -182,7 +192,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 # RESOURCES - Data that An MCP client can READ to inspect state (not execute actions)
 # ============================================================================
 # Resources are read-only; Claude can view them but not modify them.
-# Each resource has a URI like "memory://data" or "file://cosmin.json".
+# Each resource has a URI like "memory://data" or "file://memory.json".
 
 # --- Resource Handler: Advertisement ---
 # When the client asks "what resources do you have?", this handler replies with
@@ -191,24 +201,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 async def list_resources():
     """Advertisement: Tell Claude about all available resources."""
     return [
-        {
-            "uri": "memory://data",
-            "name": "Memory Store",
-            "description": "Current memory.json file with all saved key-value pairs",
-            "mimeType": "application/json"
-        },
-        {
-            "uri": "file://memory.json",
-            "name": "Memory File",
-            "description": "Direct path to memory.json in project root",
-            "mimeType": "application/json"
-        },
-        {
-            "uri": "status://server",
-            "name": "Server Status",
-            "description": "Current server information and stats",
-            "mimeType": "text/plain"
-        },
+        memory_store.get_memory_data_resource(),
+        memory_store.get_memory_file_resource(),
+        server_status.get_server_status_resource(),
     ]
 
 # --- Resource Handler: Reading ---
@@ -219,38 +214,74 @@ async def list_resources():
 @server.read_resource()
 async def read_resource(uri) -> str:
     """Read a resource: match URI to content, return as string."""
-    # Normalize URI: file://cosmin.json/ becomes file://cosmin.json
+    # Normalize URI: file://memory.json/ becomes file://memory.json
     key = str(uri).rstrip("/")
 
     # RESOURCE 1 & 2: Memory data (two ways to access the same file)
     if key in ("memory://data", "file://memory.json"):
-        return json.dumps(load_memory(), indent=2)
+        return memory_store.read_memory_data()
 
     # RESOURCE 3: Server status and statistics
     elif key == "status://server":
-        mem = load_memory()
-        return f"""MCP Server Status
-================
-Server: simple-mcp-server
-Status: Running
-Protocol: stdio
-
-Memory Stats:
-- Entries: {len(mem)}
-- Keys: {', '.join(mem.keys()) if mem else 'none'}
-- File: {MEMORY_FILE}
-
-Tools Available: 5
-1. save_memory   (persistent)
-2. load_memory   (persistent)
-3. get_time      (stateless)
-4. calculate     (stateless)
-5. get_weather   (network)
-"""
+        return server_status.read_server_status()
 
     else:
         # Claude asked for a resource that doesn't exist
         return f"Unknown resource: {key}"
+
+# ============================================================================
+# PROMPTS - Reusable prompt templates that Claude can use
+# ============================================================================
+# Prompt templates are parameterized prompts that Claude can request to fill in
+# with specific values and use in conversations. They are organized in /prompts.
+
+# --- Prompt Handler: Advertisement ---
+# When the client asks "what prompts do you have?", this handler replies with
+# a list of all available prompts, their descriptions, and arguments.
+@server.list_prompts()
+async def list_prompts():
+    """Advertisement: Tell Claude about all available prompt templates."""
+    return [
+        weather_activity_planner.WEATHER_ACTIVITY_PLANNER,
+        weather_alert_explainer.WEATHER_ALERT_EXPLAINER,
+    ]
+
+# --- Prompt Handler: Content Generation ---
+# When the client requests a prompt with specific arguments, this handler:
+# 1. Matches the prompt name
+# 2. Fills in the arguments via the render function
+# 3. Returns the complete prompt for Claude to use
+@server.get_prompt()
+async def get_prompt(name: str, arguments: dict | None = None) -> GetPromptResult:
+    """Return prompt template content with arguments filled in."""
+    arguments = arguments or {}
+
+    if name == "weather_activity_planner":
+        return weather_activity_planner.render(
+            arguments.get("location", "unknown location"),
+            arguments.get("activity_type", "outdoor activity"),
+            arguments.get("time_horizon", "soon"),
+        )
+
+    elif name == "weather_alert_explainer":
+        return weather_alert_explainer.render(
+            arguments.get("alert_type", "weather alert"),
+            arguments.get("region", "the region"),
+        )
+
+    else:
+        return GetPromptResult(
+            description=f"Unknown prompt: {name}",
+            messages=[
+                PromptMessage(
+                    role="user",
+                    content=TextContent(
+                        type="text",
+                        text=f"Prompt template '{name}' not found.",
+                    ),
+                )
+            ],
+        )
 
 # ============================================================================
 # SERVER STARTUP
