@@ -1,4 +1,22 @@
 #!/usr/bin/env python3
+"""
+Simple MCP Server with Tools and Resources
+
+ARCHITECTURE:
+- TOOLS (5): Functions that An MCP client can CALL to perform actions
+  · save_memory, load_memory, get_time, calculate, get_weather
+
+- RESOURCES (4): Data that An MCP client can READ to inspect state
+  · memory://data, file://memory.json, status://server
+
+FLOW:
+1. An MCP client connects to this server via stdio
+2. Server advertises what it can do (tools + resources)
+3. The MCP client asks: "call this tool" or "read this resource"
+4. Server executes and returns result
+5. The client formats the result for the user
+"""
+
 import json
 import asyncio
 from datetime import datetime
@@ -10,39 +28,54 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent
 
+# Persistent storage file for save_memory and load_memory tools
 MEMORY_FILE = Path(__file__).parent / "memory.json"
 
+# --- Helpers for persistent memory storage ---
 def load_memory():
+    """Read memory.json file, return as dict."""
     if MEMORY_FILE.exists():
         content = MEMORY_FILE.read_text().strip()
         return json.loads(content) if content else {}
     return {}
 
 def save_memory(data):
+    """Write dict to memory.json file."""
     MEMORY_FILE.write_text(json.dumps(data, indent=2))
 
+# Initialize the MCP server
 server = Server("simple-mcp-server")
 
-# Tool implementations
+# ============================================================================
+# TOOLS - Functions that An MCP client can CALL to perform actions
+# ============================================================================
+# Each function receives a dict of arguments and returns a string result.
+# The returned string is sent back to Claude, which formats it for the user.
+
 async def save_memory_tool(args):
+    """TOOL: Save a key-value pair to persistent memory.json file."""
     mem = load_memory()
     mem[args["key"]] = args["value"]
     save_memory(mem)
     return f"Saved {args['key']}"
 
 async def load_memory_tool(args):
+    """TOOL: Load and return all saved memories from memory.json file."""
     return json.dumps(load_memory(), indent=2)
 
 async def get_time_tool(args):
+    """TOOL: Return the current date and time."""
     return datetime.now().isoformat()
 
 async def calculate_tool(args):
+    """TOOL: Perform math operation (add/subtract/multiply/divide)."""
     a, b = float(args["a"]), float(args["b"])
     op = args["operation"]
     r = a + b if op == "add" else a - b if op == "subtract" else a * b if op == "multiply" else a / b
     return f"{a} {op} {b} = {r}"
 
 async def get_weather_tool(args):
+    """TOOL: Fetch current weather for a city from wttr.in (free API, no key needed)."""
     city = args["city"]
     try:
         async with httpx.AsyncClient(timeout=15) as client:
@@ -63,9 +96,12 @@ async def get_weather_tool(args):
         f"humidity {now['humidity']}%, wind {now['windspeedKmph']} km/h"
     )
 
-# Tool handlers
+# --- Tool Handler: Advertisement ---
+# When the client asks "what tools do you have?", this handler replies with
+# a list of all available tools, their descriptions, and what arguments they need.
 @server.list_tools()
 async def list_tools():
+    """Advertisement: Tell Claude about all available tools."""
     return [
         {
             "name": "save_memory",
@@ -121,8 +157,15 @@ async def list_tools():
         },
     ]
 
+# --- Tool Handler: Execution ---
+# When the client asks to call a tool, this handler:
+# 1. Routes the tool name to the right function (the router dict)
+# 2. Calls that function with the arguments the client extracted
+# 3. Wraps the result in TextContent format (required by MCP SDK)
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+    """Execute a tool: route to implementation, call it, wrap the result."""
+    # Router: maps tool names to their implementation functions
     tools_impl = {
         "save_memory": save_memory_tool,
         "load_memory": load_memory_tool,
@@ -130,12 +173,23 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         "calculate": calculate_tool,
         "get_weather": get_weather_tool,
     }
+    # Call the function and get the result string
     result = await tools_impl[name](arguments or {})
+    # Wrap result in TextContent (MCP SDK requirement for tools)
     return [TextContent(type="text", text=result)]
 
-# Resource handlers
+# ============================================================================
+# RESOURCES - Data that An MCP client can READ to inspect state (not execute actions)
+# ============================================================================
+# Resources are read-only; Claude can view them but not modify them.
+# Each resource has a URI like "memory://data" or "file://cosmin.json".
+
+# --- Resource Handler: Advertisement ---
+# When the client asks "what resources do you have?", this handler replies with
+# a list of all available resources, their URIs, descriptions, and MIME types.
 @server.list_resources()
 async def list_resources():
+    """Advertisement: Tell Claude about all available resources."""
     return [
         {
             "uri": "memory://data",
@@ -150,12 +204,6 @@ async def list_resources():
             "mimeType": "application/json"
         },
         {
-            "uri": "file://cosmin.json",
-            "name": "Cosmin Profile",
-            "description": "User profile and information",
-            "mimeType": "application/json"
-        },
-        {
             "uri": "status://server",
             "name": "Server Status",
             "description": "Current server information and stats",
@@ -163,17 +211,22 @@ async def list_resources():
         },
     ]
 
+# --- Resource Handler: Reading ---
+# When the client asks to read a resource, this handler:
+# 1. Normalizes the URI (removes trailing slashes from file:// URIs)
+# 2. Matches it against known resources
+# 3. Returns the content as a string
 @server.read_resource()
 async def read_resource(uri) -> str:
+    """Read a resource: match URI to content, return as string."""
+    # Normalize URI: file://cosmin.json/ becomes file://cosmin.json
     key = str(uri).rstrip("/")
 
+    # RESOURCE 1 & 2: Memory data (two ways to access the same file)
     if key in ("memory://data", "file://memory.json"):
         return json.dumps(load_memory(), indent=2)
 
-    elif key == "file://cosmin.json":
-        cosmin_file = Path(__file__).parent / "cosmin.json"
-        return cosmin_file.read_text() if cosmin_file.exists() else "{}"
-
+    # RESOURCE 3: Server status and statistics
     elif key == "status://server":
         mem = load_memory()
         return f"""MCP Server Status
@@ -196,11 +249,20 @@ Tools Available: 5
 """
 
     else:
+        # Claude asked for a resource that doesn't exist
         return f"Unknown resource: {key}"
 
+# ============================================================================
+# SERVER STARTUP
+# ============================================================================
 async def main():
+    """Start the MCP server on stdio (standard input/output)."""
+    # stdio_server() handles the MCP protocol over stdin/stdout
+    # This is how Claude Desktop communicates with this server
     async with stdio_server() as (reader, writer):
+        # server.run() starts listening for requests from Claude Desktop
         await server.run(reader, writer, server.create_initialization_options())
 
 if __name__ == "__main__":
+    # Run the async server
     asyncio.run(main())

@@ -12,20 +12,18 @@ A minimal, easy-to-understand [MCP](https://modelcontextprotocol.io/) (Model Con
 | **calculate** | Math operations (add/subtract/multiply/divide) | ❌ No |
 | **get_weather** | Current weather for a city (via wttr.in) | ❌ No |
 
-## 📁 Resources (4 data sources)
+## 📁 Resources (3 data sources)
 
 | Resource | Purpose |
 |----------|---------|
 | **memory://data** | View all saved memories as JSON |
 | **file://memory.json** | Direct access to memory.json file |
-| **file://cosmin.json** | User profile data |
 | **status://server** | Server status and statistics |
 
 ## 📁 Files
 
 - **server.py** - The MCP server implementation with tools & resources
 - **requirements.txt** - Python dependencies (`mcp[cli]`)
-- **cosmin.json** - Sample data file exposed as a resource
 - **memory.json** - Auto-created when you save memories
 - **test_tools.py** - Quick tool verification script
 
@@ -33,7 +31,6 @@ A minimal, easy-to-understand [MCP](https://modelcontextprotocol.io/) (Model Con
 
 ### Installation (One-time)
 ```bash
-cd /Users/cosmin/Projects/MCP/simpleexample
 uv venv
 source .venv/bin/activate
 uv pip install -r requirements.txt
@@ -71,8 +68,8 @@ Edit the config file (create it if it doesn't exist):
 {
   "mcpServers": {
     "simple-mcp-server": {
-      "command": "/Users/cosmin/Projects/MCP/simpleexample/.venv/bin/python",
-      "args": ["/Users/cosmin/Projects/MCP/simpleexample/server.py"]
+      "command": "/path/to/simple-mcp-server/.venv/bin/python",
+      "args": ["/path/to/simple-mcp-server/server.py"]
     }
   }
 }
@@ -106,9 +103,6 @@ Ask Claude to **perform actions**:
 Ask Claude to **view data**:
 
 ```
-"Show me the cosmin profile"
-→ Reads: file://cosmin.json resource → Returns JSON content
-
 "What's in the memory store?"
 → Reads: memory://data resource → Returns all saved memories
 
@@ -131,12 +125,7 @@ Workflow:
    → Resource: load_memory tool + memory://data resource
    → Can read via tool OR resource
 
-3. User: "What's my profile and settings?"
-   → Resource: file://cosmin.json (profile data)
-   → Tool: load_memory (settings)
-   → Returns both in one response
-
-4. User: "Calculate 100 * 3, then save result"
+3. User: "Calculate 100 * 3, then save result"
    → Tool: calculate executes → Returns 300
    → Tool: save_memory executes → Saves result
    → Status: Resource shows calculation in stats
@@ -144,7 +133,7 @@ Workflow:
 
 **Key Differences:**
 - **Tools** (5): Execute actions - save data, calculate, get time, fetch weather
-- **Resources** (4): Read data - memory.json, cosmin.json, server status
+- **Resources** (3): Read data - memory.json, server status
 
 **Best Practices:**
 - Use **Tools** for: Creating, modifying, computing
@@ -157,7 +146,7 @@ All saved memories go to: `./memory.json` (in project root)
 
 View anytime:
 ```bash
-cat /Users/cosmin/Projects/MCP/simpleexample/memory.json
+cat /path/to/simple-mcp-server/memory.json
 ```
 
 ## 🏗️ Architecture
@@ -175,10 +164,9 @@ Claude Desktop
       │   ├── calculate → compute ⚡ stateless
       │   └── get_weather → wttr.in 🌐 network
       │
-      └── Resources (4)
+      └── Resources (3)
           ├── memory://data → memory.json ✅ persistent
           ├── file://memory.json → memory.json ✅ persistent
-          ├── file://cosmin.json → cosmin.json ✅ persistent
           └── status://server → server stats ⚡ stateless
 ```
 
