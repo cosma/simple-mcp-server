@@ -61,13 +61,156 @@ Run manually it looks like it hangs — that's correct, it's waiting for stdin
 from an MCP client.
 
 **Option 2: For Development & Testing (with Inspector)**
+
+> ⚠️ **Note:** `mcp dev` requires mcp >= 1.10.0, but this project uses mcp 1.2.0 for stability. Use **Web UI Mode** or **CLI Mode** below instead.
+
+Use the [**Web UI Mode**](#web-ui-mode-recommended-for-interactive-testing) or [**CLI Mode**](#cli-mode-for-scripting--automation) sections below to test with the MCP Inspector.
+
+## 🔬 Testing with MCP Inspector CLI
+
+The [@modelcontextprotocol/inspector](https://github.com/modelcontextprotocol/inspector) is a powerful developer tool for testing MCP servers directly from the command line or web UI. It supports three modes:
+
+### Web UI Mode (Recommended for Interactive Testing)
 ```bash
+# Terminal 1: Start the server
 source .venv/bin/activate
-mcp dev server.py
+python3 server.py
+
+# Terminal 2: Launch the web UI
+npx @modelcontextprotocol/inspector python3 /path/to/simple-mcp-server/server.py
 ```
-Opens interactive MCP Inspector at `http://localhost:5173` - test tools & resources live
+Opens at `http://localhost:5173` — click **Connect** to test tools, resources, and prompts interactively.
 
+### CLI Mode (For Scripting & Automation)
 
+**List all available tools:**
+```bash
+npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py --method tools/list
+```
+Output:
+```json
+{
+  "tools": [
+    {"name": "save_memory", "description": "Save key-value pairs to persistent memory"},
+    {"name": "load_memory", "description": "Load all saved memories"},
+    {"name": "get_time", "description": "Get current date and time"},
+    {"name": "calculate", "description": "Do math operations"},
+    {"name": "get_weather", "description": "Get the current weather for a city"}
+  ]
+}
+```
+
+**Call a tool (with JSON arguments):**
+```bash
+# Calculate 25 * 4
+npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py \
+  --method tools/call \
+  --tool-name calculate \
+  --tool-args-json '{"a":25,"b":4,"operation":"multiply"}'
+```
+Output:
+```json
+{
+  "content": [
+    {"type": "text", "text": "25.0 multiply 4.0 = 100.0"}
+  ],
+  "isError": false
+}
+```
+
+**Save memory:**
+```bash
+npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py \
+  --method tools/call \
+  --tool-name save_memory \
+  --tool-args-json '{"key":"project","value":"MCP Server"}'
+```
+
+**Get current time:**
+```bash
+npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py \
+  --method tools/call \
+  --tool-name get_time
+```
+
+**Get weather for a city:**
+```bash
+npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py \
+  --method tools/call \
+  --tool-name get_weather \
+  --tool-args-json '{"city":"London"}'
+```
+
+### Resources via CLI
+
+**List all available resources:**
+```bash
+npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py \
+  --method resources/list
+```
+
+**Read a specific resource:**
+```bash
+# Read memory data
+npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py \
+  --method resources/read \
+  --uri memory://data
+
+# Read server status
+npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py \
+  --method resources/read \
+  --uri status://server
+```
+
+### Prompts via CLI
+
+**List all available prompts:**
+```bash
+npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py \
+  --method prompts/list
+```
+
+**Get a prompt with arguments:**
+```bash
+npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py \
+  --method prompts/get \
+  --prompt-name weather_activity_planner \
+  --prompt-args location="Colorado" activity_type="hiking" time_horizon="this weekend"
+```
+
+### TUI Mode (Terminal User Interface)
+For an interactive terminal interface:
+```bash
+npx @modelcontextprotocol/inspector --tui .venv/bin/python server.py
+```
+Navigate with arrow keys, press Enter to interact with tools, resources, and prompts.
+
+### Environment Variables in CLI
+
+Pass environment variables to the server:
+```bash
+npx @modelcontextprotocol/inspector --cli \
+  -e DEBUG=1 \
+  -e API_KEY=your_key \
+  .venv/bin/python server.py \
+  --method tools/list
+```
+
+### Formatting Output
+
+Get JSON-formatted output:
+```bash
+npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py \
+  --method tools/list \
+  --format json
+```
+
+Or pretty-printed text:
+```bash
+npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py \
+  --method tools/list \
+  --format text
+```
 
 ### Configure Claude Desktop
 
@@ -279,6 +422,14 @@ def render(param1: str, param2: str = "default") -> GetPromptResult:
 **Dependencies not found?**
 - Ensure you're using the venv: `source .venv/bin/activate`
 - Or reinstall: `uv pip install -r requirements.txt`
+
+**`mcp dev` command fails with "Server.run() missing arguments"?**
+- This project uses mcp 1.2.0 for stability, which doesn't support the newer `mcp dev` API
+- **Instead, use:**
+  - **Web UI Mode:** `npx @modelcontextprotocol/inspector python3 server.py`
+  - **CLI Mode:** `npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py --method tools/list`
+  - **Direct stdio:** `python3 server.py` (for Claude Desktop)
+- See [Testing with MCP Inspector CLI](#-testing-with-mcp-inspector-cli) for examples
 
 ## 📚 Learning Resources
 
