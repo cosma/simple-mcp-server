@@ -1,21 +1,11 @@
 """Server Status resource."""
 
-from .memory_store import load_memory, MEMORY_FILE
-
-
-def get_server_status_resource() -> dict:
-    """Resource definition for status://server"""
-    return {
-        "uri": "status://server",
-        "name": "Server Status",
-        "description": "Current server information and stats",
-        "mimeType": "text/plain"
-    }
+from . import memory_store
 
 
 def read_server_status() -> str:
     """Read status://server resource content."""
-    mem = load_memory()
+    mem = memory_store.load_memory()
     return f"""MCP Server Status
 ================
 Server: simple-mcp-server
@@ -25,7 +15,7 @@ Protocol: stdio
 Memory Stats:
 - Entries: {len(mem)}
 - Keys: {', '.join(mem.keys()) if mem else 'none'}
-- File: {MEMORY_FILE}
+- File: {memory_store.MEMORY_FILE}
 
 Tools Available: 5
 1. save_memory   (persistent)

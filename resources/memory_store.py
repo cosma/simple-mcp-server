@@ -1,4 +1,4 @@
-"""Memory Store resources."""
+"""Memory store: persistent key-value storage in memory.json and its resource."""
 
 import json
 from pathlib import Path
@@ -14,31 +14,11 @@ def load_memory() -> dict:
     return {}
 
 
-def get_memory_data_resource() -> dict:
-    """Resource definition for memory://data"""
-    return {
-        "uri": "memory://data",
-        "name": "Memory Store",
-        "description": "Current memory.json file with all saved key-value pairs",
-        "mimeType": "application/json"
-    }
-
-
-def get_memory_file_resource() -> dict:
-    """Resource definition for file://memory.json"""
-    return {
-        "uri": "file://memory.json",
-        "name": "Memory File",
-        "description": "Direct path to memory.json in project root",
-        "mimeType": "application/json"
-    }
+def save_memory(data: dict) -> None:
+    """Write dict to memory.json file."""
+    MEMORY_FILE.write_text(json.dumps(data, indent=2))
 
 
 def read_memory_data() -> str:
-    """Read memory://data resource content."""
-    return json.dumps(load_memory(), indent=2)
-
-
-def read_memory_file() -> str:
-    """Read file://memory.json resource content."""
+    """Content for the memory://data and file://memory.json resources."""
     return json.dumps(load_memory(), indent=2)

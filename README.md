@@ -29,16 +29,16 @@ A minimal, easy-to-understand [MCP](https://modelcontextprotocol.io/) (Model Con
 
 ## 📁 Files & Folders
 
-- **server.py** - Main MCP server implementation
-- **requirements.txt** - Python dependencies (`mcp[cli]`)
+- **server.py** - Main MCP server (FastMCP-style API: `MCPServer` + decorators)
+- **requirements.txt** - Python dependencies (unpinned, always latest: `mcp[cli]`, `httpx`, `pytest`, `pytest-asyncio`)
 - **memory.json** - Auto-created when you save memories
 - **/prompts/** - Prompt template definitions
-  - `weather_activity_planner.py` - Activity planning template
+  - `weather_activity_planner.py` - Activity planning template (`render()` returns the prompt text)
   - `weather_alert_explainer.py` - Alert explanation template
 - **/resources/** - Resource implementations
   - `memory_store.py` - Memory data resources
   - `server_status.py` - Server status resource
-- **test_server.py** - Comprehensive test suite for tools, resources, and prompts
+- **test_server.py** - Test suite for tools, resources, and prompts (`pytest.ini` enables async tests)
 
 ## 🚀 Setup & Running
 
@@ -51,166 +51,84 @@ uv pip install -r requirements.txt
 
 ### Run the Server Locally
 
-**Option 1: For Claude Desktop (normal mode)**
+**For Claude Desktop (stdio)**
 ```bash
 source .venv/bin/activate
-python3 server.py
+python server.py
 ```
-Keep this running in a terminal. Claude Desktop will connect automatically.
 Run manually it looks like it hangs — that's correct, it's waiting for stdin
-from an MCP client.
+from an MCP client. Normally Claude Desktop starts it for you (see the config below).
 
-**Option 2: For Development & Testing (with Inspector)**
-
-> ⚠️ **Note:** `mcp dev` requires mcp >= 1.10.0, but this project uses mcp 1.2.0 for stability. Use **Web UI Mode** or **CLI Mode** below instead.
-
-Use the [**Web UI Mode**](#web-ui-mode-recommended-for-interactive-testing) or [**CLI Mode**](#cli-mode-for-scripting--automation) sections below to test with the MCP Inspector.
-
-## 🔬 Testing with MCP Inspector CLI
-
-The [@modelcontextprotocol/inspector](https://github.com/modelcontextprotocol/inspector) is a powerful developer tool for testing MCP servers directly from the command line or web UI. It supports three modes:
-
-### Web UI Mode (Recommended for Interactive Testing)
+**For development & testing (MCP Inspector)**
 ```bash
-# Terminal 1: Start the server
 source .venv/bin/activate
-python3 server.py
-
-# Terminal 2: Launch the web UI
-npx @modelcontextprotocol/inspector python3 /path/to/simple-mcp-server/server.py
+mcp dev server.py
 ```
-Opens at `http://localhost:5173` — click **Connect** to test tools, resources, and prompts interactively.
+Starts the [MCP Inspector](https://github.com/modelcontextprotocol/inspector). Open the
+URL it prints (`http://localhost:6274/?MCP_PROXY_AUTH_TOKEN=...`, the token is pre-filled),
+click **Connect**, then use the **Tools**, **Resources** and **Prompts** tabs.
 
-### CLI Mode (For Scripting & Automation)
+## 🔬 Testing with @modelcontextprotocol/inspector
 
-**List all available tools:**
+The Inspector can also run without a browser (CLI mode), which is handy for scripts.
+Launch it with `npx` and pass the command that starts your server — it spawns the server
+itself, so you don't start `server.py` separately. Run these from the project root.
+
+Shortcut used below:
 ```bash
-npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py --method tools/list
+INSPECT="npx -y @modelcontextprotocol/inspector --cli .venv/bin/python server.py"
 ```
-Output:
+
+**Web UI without `mcp dev`:**
+```bash
+npx @modelcontextprotocol/inspector .venv/bin/python server.py
+```
+
+**Tools**
+```bash
+$INSPECT --method tools/list
+$INSPECT --method tools/call --tool-name get_time
+$INSPECT --method tools/call --tool-name calculate --tool-arg a=25 b=4 operation=multiply
+$INSPECT --method tools/call --tool-name save_memory --tool-arg key=project value="MCP Server"
+$INSPECT --method tools/call --tool-name load_memory
+$INSPECT --method tools/call --tool-name get_weather --tool-arg city=Bucharest
+```
+Example result for the `calculate` call:
 ```json
 {
-  "tools": [
-    {"name": "save_memory", "description": "Save key-value pairs to persistent memory"},
-    {"name": "load_memory", "description": "Load all saved memories"},
-    {"name": "get_time", "description": "Get current date and time"},
-    {"name": "calculate", "description": "Do math operations"},
-    {"name": "get_weather", "description": "Get the current weather for a city"}
-  ]
-}
-```
-
-**Call a tool (with JSON arguments):**
-```bash
-# Calculate 25 * 4
-npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py \
-  --method tools/call \
-  --tool-name calculate \
-  --tool-args-json '{"a":25,"b":4,"operation":"multiply"}'
-```
-Output:
-```json
-{
-  "content": [
-    {"type": "text", "text": "25.0 multiply 4.0 = 100.0"}
-  ],
+  "content": [{ "type": "text", "text": "25.0 multiply 4.0 = 100.0" }],
+  "structuredContent": { "result": "25.0 multiply 4.0 = 100.0" },
   "isError": false
 }
 ```
+> Tool arguments use repeated `key=value` pairs after one `--tool-arg`. There is no
+> JSON-argument flag: passing `--tool-args-json` silently sends **empty** arguments and
+> the tool fails with "Field required".
 
-**Save memory:**
+**Resources**
 ```bash
-npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py \
-  --method tools/call \
-  --tool-name save_memory \
-  --tool-args-json '{"key":"project","value":"MCP Server"}'
+$INSPECT --method resources/list
+$INSPECT --method resources/read --uri memory://data
+$INSPECT --method resources/read --uri status://server
 ```
 
-**Get current time:**
+**Prompts**
 ```bash
-npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py \
-  --method tools/call \
-  --tool-name get_time
+$INSPECT --method prompts/list
+$INSPECT --method prompts/get --prompt-name weather_activity_planner \
+  --prompt-args location=Colorado activity_type=hiking time_horizon="this weekend"
+$INSPECT --method prompts/get --prompt-name weather_alert_explainer \
+  --prompt-args alert_type="heat advisory" region=Texas
 ```
 
-**Get weather for a city:**
+> In CLI mode the server command must come **first**, then the `--method ...` flags.
+
+### Automated tests
 ```bash
-npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py \
-  --method tools/call \
-  --tool-name get_weather \
-  --tool-args-json '{"city":"London"}'
+source .venv/bin/activate
+python -m pytest -q
 ```
-
-### Resources via CLI
-
-**List all available resources:**
-```bash
-npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py \
-  --method resources/list
-```
-
-**Read a specific resource:**
-```bash
-# Read memory data
-npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py \
-  --method resources/read \
-  --uri memory://data
-
-# Read server status
-npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py \
-  --method resources/read \
-  --uri status://server
-```
-
-### Prompts via CLI
-
-**List all available prompts:**
-```bash
-npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py \
-  --method prompts/list
-```
-
-**Get a prompt with arguments:**
-```bash
-npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py \
-  --method prompts/get \
-  --prompt-name weather_activity_planner \
-  --prompt-args location="Colorado" activity_type="hiking" time_horizon="this weekend"
-```
-
-### TUI Mode (Terminal User Interface)
-For an interactive terminal interface:
-```bash
-npx @modelcontextprotocol/inspector --tui .venv/bin/python server.py
-```
-Navigate with arrow keys, press Enter to interact with tools, resources, and prompts.
-
-### Environment Variables in CLI
-
-Pass environment variables to the server:
-```bash
-npx @modelcontextprotocol/inspector --cli \
-  -e DEBUG=1 \
-  -e API_KEY=your_key \
-  .venv/bin/python server.py \
-  --method tools/list
-```
-
-### Formatting Output
-
-Get JSON-formatted output:
-```bash
-npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py \
-  --method tools/list \
-  --format json
-```
-
-Or pretty-printed text:
-```bash
-npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py \
-  --method tools/list \
-  --format text
-```
+The tests use a temporary memory file, so your real `memory.json` is never touched.
 
 ### Configure Claude Desktop
 
@@ -358,58 +276,44 @@ Claude Desktop
 
 ## 🔧 Customization
 
+This server uses the high-level (FastMCP-style) API: you register plain Python functions
+with decorators, and the name, description and argument schema come from the function
+name, docstring and type hints. Restart the client (or `mcp dev`) after any change.
+
 ### Adding Tools
-Edit `server.py`:
-1. Add tool implementation function
-2. Add Tool to `@server.list_tools()` function
-3. Add case to `@server.call_tool()` function
-4. Restart Claude Desktop
+In `server.py`:
+```python
+@mcp.tool()
+def shout(text: str) -> str:
+    """Return the text in upper case."""
+    return text.upper()
+```
+Use `async def` for anything that does network I/O, so the server isn't blocked.
 
 ### Adding Resources
-Create new file in `/resources/`:
-1. Define resource metadata and read function
-2. Import in `/resources/__init__.py`
-3. Add to `list_resources()` in `server.py`
-4. Add case to `read_resource()` in `server.py`
-5. Restart Claude Desktop
-
-### Adding Prompts
-Create new file in `/prompts/`:
-1. Define prompt template with name, description, arguments
-2. Add a `render()` function that fills in parameters
-3. Import in `/prompts/__init__.py`
-4. Add to `list_prompts()` in `server.py`
-5. Add case to `get_prompt()` in `server.py`
-6. Restart Claude Desktop
-
-**Example prompt template** (`/prompts/my_template.py`):
+Put the logic in `/resources/` (e.g. `my_resource.py` with a `read_...()` function), import it
+in `/resources/__init__.py`, then register it in `server.py`:
 ```python
-from mcp.types import GetPromptResult, Prompt, PromptArgument, PromptMessage, TextContent
-
-MY_TEMPLATE = Prompt(
-    name="my_template",
-    description="My custom template",
-    arguments=[
-        PromptArgument(name="param1", description="First param", required=True),
-        PromptArgument(name="param2", description="Second param", required=False),
-    ],
-)
-
-def render(param1: str, param2: str = "default") -> GetPromptResult:
-    return GetPromptResult(
-        description=f"Custom prompt with {param1}",
-        messages=[
-            PromptMessage(
-                role="user",
-                content=TextContent(type="text", text=f"Use {param1} and {param2}"),
-            )
-        ],
-    )
+@mcp.resource("my://thing", name="My Thing", mime_type="text/plain")
+def my_thing() -> str:
+    """What this resource contains."""
+    return my_resource.read_thing()
 ```
 
-> ⚠️ **Use the typed MCP objects, not plain dicts.** A `PromptMessage`'s `content`
-> must be a `TextContent` object — a bare string fails validation and the client
-> reports *"Failed to attach prompt"* with no useful error in the logs.
+### Adding Prompts
+Put the template in `/prompts/` (a `render(...) -> str` function), import it in
+`/prompts/__init__.py`, then register it in `server.py`:
+```python
+@mcp.prompt()
+def my_template(param1: str, param2: str = "default") -> str:
+    """What this prompt does."""
+    return my_template_module.render(param1, param2)
+```
+Parameters without a default are required; parameters with a default are optional.
+
+> ⚠️ Don't give a registered function the same name as a module you import (e.g. a prompt
+> function called `weather_activity_planner` next to `import weather_activity_planner`) —
+> it shadows the module. `server.py` imports the prompt modules under aliases for this reason.
 
 ## ❓ Troubleshooting
 
@@ -423,13 +327,16 @@ def render(param1: str, param2: str = "default") -> GetPromptResult:
 - Ensure you're using the venv: `source .venv/bin/activate`
 - Or reinstall: `uv pip install -r requirements.txt`
 
-**`mcp dev` command fails with "Server.run() missing arguments"?**
-- This project uses mcp 1.2.0 for stability, which doesn't support the newer `mcp dev` API
-- **Instead, use:**
-  - **Web UI Mode:** `npx @modelcontextprotocol/inspector python3 server.py`
-  - **CLI Mode:** `npx @modelcontextprotocol/inspector --cli .venv/bin/python server.py --method tools/list`
-  - **Direct stdio:** `python3 server.py` (for Claude Desktop)
-- See [Testing with MCP Inspector CLI](#-testing-with-mcp-inspector-cli) for examples
+**`mcp dev` says "PORT IS IN USE at port 6277"?**
+- A previous Inspector is still running. Find it with `lsof -i :6277` and stop that
+  process (`kill <PID>`), then run `mcp dev server.py` again.
+
+**Tool call via the Inspector CLI fails with "Field required"?**
+- Pass arguments as `--tool-arg key=value ...` (there is no `--tool-args-json`).
+
+**Dependencies**
+- `requirements.txt` is intentionally unpinned so installs always get the latest `mcp`
+  and other libraries: `uv pip install -U -r requirements.txt`.
 
 ## 📚 Learning Resources
 

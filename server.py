@@ -1,100 +1,86 @@
 #!/usr/bin/env python3
 """
-Simple MCP Server with Tools, Resources, and Prompts
+Simple MCP Server with Tools, Resources, and Prompts (FastMCP-style API)
 
-ARCHITECTURE:
-- TOOLS (5): Functions that An MCP client can CALL to perform actions
+- TOOLS (5): functions a client can CALL
   · save_memory, load_memory, get_time, calculate, get_weather
-
-- RESOURCES (3): Data that An MCP client can READ to inspect state
+- RESOURCES (3): data a client can READ  (implemented in /resources)
   · memory://data, file://memory.json, status://server
-  · Organized in /resources folder
-
-- PROMPTS (2): Reusable prompt templates with parameterized content
+- PROMPTS (2): parameterized prompt templates  (implemented in /prompts)
   · weather_activity_planner, weather_alert_explainer
-  · Organized in /prompts folder
 
-FLOW:
-1. An MCP client connects to this server via stdio
-2. Server advertises what it can do (tools + resources + prompts)
-3. The MCP client asks: "call this tool", "read this resource", or "get this prompt"
-4. Server executes/generates and returns result
-5. The client formats the result for the user
+Names, descriptions and argument schemas are derived from each function's
+name, docstring and type hints.
+
+Run:  python server.py        (stdio, for Claude Desktop)
+      mcp dev server.py       (MCP Inspector)
 """
 
 import json
-import asyncio
 from datetime import datetime
-from pathlib import Path
+from typing import Literal
 
-import httpx
+import httpx2
+from mcp.server import MCPServer
 
-from mcp.server import Server
-from mcp.server.stdio import stdio_server
-from mcp.types import GetPromptResult, PromptMessage, TextContent
-
-from prompts import weather_activity_planner, weather_alert_explainer
+from prompts import weather_activity_planner as activity_planner
+from prompts import weather_alert_explainer as alert_explainer
 from resources import memory_store, server_status
 
-# Persistent storage file for save_memory and load_memory tools
-MEMORY_FILE = Path(__file__).parent / "memory.json"
+mcp = MCPServer("simple-mcp-server")
 
-
-# --- Helpers for persistent memory storage ---
-def load_memory():
-    """Read memory.json file, return as dict."""
-    if MEMORY_FILE.exists():
-        content = MEMORY_FILE.read_text().strip()
-        return json.loads(content) if content else {}
-    return {}
-
-
-def save_memory(data):
-    """Write dict to memory.json file."""
-    MEMORY_FILE.write_text(json.dumps(data, indent=2))
-
-# Initialize the MCP server
-server = Server("simple-mcp-server")
 
 # ============================================================================
-# TOOLS - Functions that An MCP client can CALL to perform actions
+# TOOLS
 # ============================================================================
-# Each function receives a dict of arguments and returns a string result.
-# The returned string is sent back to Claude, which formats it for the user.
+@mcp.tool()
+def save_memory(key: str, value: str) -> str:
+    """Save a key-value pair to persistent memory."""
+    data = memory_store.load_memory()
+    data[key] = value
+    memory_store.save_memory(data)
+    return f"Saved {key}"
 
-async def save_memory_tool(args):
-    """TOOL: Save a key-value pair to persistent memory.json file."""
-    mem = load_memory()
-    mem[args["key"]] = args["value"]
-    save_memory(mem)
-    return f"Saved {args['key']}"
 
-async def load_memory_tool(args):
-    """TOOL: Load and return all saved memories from memory.json file."""
-    return json.dumps(load_memory(), indent=2)
+@mcp.tool()
+def load_memory() -> str:
+    """Load all saved memories."""
+    return json.dumps(memory_store.load_memory(), indent=2)
 
-async def get_time_tool(args):
-    """TOOL: Return the current date and time."""
+
+@mcp.tool()
+def get_time() -> str:
+    """Get the current date and time (ISO format)."""
     return datetime.now().isoformat()
 
-async def calculate_tool(args):
-    """TOOL: Perform math operation (add/subtract/multiply/divide)."""
-    a, b = float(args["a"]), float(args["b"])
-    op = args["operation"]
-    r = a + b if op == "add" else a - b if op == "subtract" else a * b if op == "multiply" else a / b
-    return f"{a} {op} {b} = {r}"
 
-async def get_weather_tool(args):
-    """TOOL: Fetch current weather for a city from wttr.in (free API, no key needed)."""
-    city = args["city"]
+@mcp.tool()
+def calculate(a: float, b: float, operation: Literal["add", "subtract", "multiply", "divide"]) -> str:
+    """Do math operations: add, subtract, multiply, divide."""
+    if operation == "add":
+        r = a + b
+    elif operation == "subtract":
+        r = a - b
+    elif operation == "multiply":
+        r = a * b
+    else:
+        if b == 0:
+            return "Cannot divide by zero."
+        r = a / b
+    return f"{a} {operation} {b} = {r}"
+
+
+@mcp.tool()
+async def get_weather(city: str) -> str:
+    """Get the current weather for a city (via wttr.in). City name, e.g. Bucharest or London."""
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx2.AsyncClient(timeout=15) as client:
             resp = await client.get(f"https://wttr.in/{city}", params={"format": "j1"})
         resp.raise_for_status()
         data = resp.json()
-    except httpx.HTTPStatusError:
+    except httpx2.HTTPStatusError:
         return f"Could not find weather for '{city}'."
-    except httpx.RequestError as e:
+    except httpx2.RequestError as e:
         return f"Weather service unreachable: {e}"
 
     now = data["current_condition"][0]
@@ -106,194 +92,42 @@ async def get_weather_tool(args):
         f"humidity {now['humidity']}%, wind {now['windspeedKmph']} km/h"
     )
 
-# --- Tool Handler: Advertisement ---
-# When the client asks "what tools do you have?", this handler replies with
-# a list of all available tools, their descriptions, and what arguments they need.
-@server.list_tools()
-async def list_tools():
-    """Advertisement: Tell Claude about all available tools."""
-    return [
-        {
-            "name": "save_memory",
-            "description": "Save key-value to memory",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "key": {"type": "string"},
-                    "value": {"type": "string"}
-                },
-                "required": ["key", "value"]
-            }
-        },
-        {
-            "name": "load_memory",
-            "description": "Load saved memories",
-            "inputSchema": {"type": "object"}
-        },
-        {
-            "name": "get_time",
-            "description": "Get current time",
-            "inputSchema": {"type": "object"}
-        },
-        {
-            "name": "calculate",
-            "description": "Do math operations",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "a": {"type": "number"},
-                    "b": {"type": "number"},
-                    "operation": {
-                        "type": "string",
-                        "enum": ["add", "subtract", "multiply", "divide"]
-                    }
-                },
-                "required": ["a", "b", "operation"]
-            }
-        },
-        {
-            "name": "get_weather",
-            "description": "Get the current weather for a city",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "city": {
-                        "type": "string",
-                        "description": "City name, e.g. Bucharest or London"
-                    }
-                },
-                "required": ["city"]
-            }
-        },
-    ]
-
-# --- Tool Handler: Execution ---
-# When the client asks to call a tool, this handler:
-# 1. Routes the tool name to the right function (the router dict)
-# 2. Calls that function with the arguments the client extracted
-# 3. Wraps the result in TextContent format (required by MCP SDK)
-@server.call_tool()
-async def call_tool(name: str, arguments: dict) -> list[TextContent]:
-    """Execute a tool: route to implementation, call it, wrap the result."""
-    # Router: maps tool names to their implementation functions
-    tools_impl = {
-        "save_memory": save_memory_tool,
-        "load_memory": load_memory_tool,
-        "get_time": get_time_tool,
-        "calculate": calculate_tool,
-        "get_weather": get_weather_tool,
-    }
-    # Call the function and get the result string
-    result = await tools_impl[name](arguments or {})
-    # Wrap result in TextContent (MCP SDK requirement for tools)
-    return [TextContent(type="text", text=result)]
 
 # ============================================================================
-# RESOURCES - Data that An MCP client can READ to inspect state (not execute actions)
+# RESOURCES
 # ============================================================================
-# Resources are read-only; Claude can view them but not modify them.
-# Each resource has a URI like "memory://data" or "file://memory.json".
+@mcp.resource("memory://data", name="Memory Store", mime_type="application/json")
+def memory_data() -> str:
+    """Current memory.json file with all saved key-value pairs."""
+    return memory_store.read_memory_data()
 
-# --- Resource Handler: Advertisement ---
-# When the client asks "what resources do you have?", this handler replies with
-# a list of all available resources, their URIs, descriptions, and MIME types.
-@server.list_resources()
-async def list_resources():
-    """Advertisement: Tell Claude about all available resources."""
-    return [
-        memory_store.get_memory_data_resource(),
-        memory_store.get_memory_file_resource(),
-        server_status.get_server_status_resource(),
-    ]
 
-# --- Resource Handler: Reading ---
-# When the client asks to read a resource, this handler:
-# 1. Normalizes the URI (removes trailing slashes from file:// URIs)
-# 2. Matches it against known resources
-# 3. Returns the content as a string
-@server.read_resource()
-async def read_resource(uri) -> str:
-    """Read a resource: match URI to content, return as string."""
-    # Normalize URI: file://memory.json/ becomes file://memory.json
-    key = str(uri).rstrip("/")
+@mcp.resource("file://memory.json", name="Memory File", mime_type="application/json")
+def memory_file() -> str:
+    """Direct path to memory.json in project root."""
+    return memory_store.read_memory_data()
 
-    # RESOURCE 1 & 2: Memory data (two ways to access the same file)
-    if key in ("memory://data", "file://memory.json"):
-        return memory_store.read_memory_data()
 
-    # RESOURCE 3: Server status and statistics
-    elif key == "status://server":
-        return server_status.read_server_status()
+@mcp.resource("status://server", name="Server Status", mime_type="text/plain")
+def status() -> str:
+    """Current server information and stats."""
+    return server_status.read_server_status()
 
-    else:
-        # Claude asked for a resource that doesn't exist
-        return f"Unknown resource: {key}"
 
 # ============================================================================
-# PROMPTS - Reusable prompt templates that Claude can use
+# PROMPTS
 # ============================================================================
-# Prompt templates are parameterized prompts that Claude can request to fill in
-# with specific values and use in conversations. They are organized in /prompts.
+@mcp.prompt()
+def weather_activity_planner(location: str, activity_type: str, time_horizon: str = "soon") -> str:
+    """Plan outdoor activities based on weather conditions and get preparation tips."""
+    return activity_planner.render(location, activity_type, time_horizon)
 
-# --- Prompt Handler: Advertisement ---
-# When the client asks "what prompts do you have?", this handler replies with
-# a list of all available prompts, their descriptions, and arguments.
-@server.list_prompts()
-async def list_prompts():
-    """Advertisement: Tell Claude about all available prompt templates."""
-    return [
-        weather_activity_planner.WEATHER_ACTIVITY_PLANNER,
-        weather_alert_explainer.WEATHER_ALERT_EXPLAINER,
-    ]
 
-# --- Prompt Handler: Content Generation ---
-# When the client requests a prompt with specific arguments, this handler:
-# 1. Matches the prompt name
-# 2. Fills in the arguments via the render function
-# 3. Returns the complete prompt for Claude to use
-@server.get_prompt()
-async def get_prompt(name: str, arguments: dict | None = None) -> GetPromptResult:
-    """Return prompt template content with arguments filled in."""
-    arguments = arguments or {}
+@mcp.prompt()
+def weather_alert_explainer(alert_type: str, region: str) -> str:
+    """Get simple explanations of weather alerts with safety tips and precautions."""
+    return alert_explainer.render(alert_type, region)
 
-    if name == "weather_activity_planner":
-        return weather_activity_planner.render(
-            arguments.get("location", "unknown location"),
-            arguments.get("activity_type", "outdoor activity"),
-            arguments.get("time_horizon", "soon"),
-        )
-
-    elif name == "weather_alert_explainer":
-        return weather_alert_explainer.render(
-            arguments.get("alert_type", "weather alert"),
-            arguments.get("region", "the region"),
-        )
-
-    else:
-        return GetPromptResult(
-            description=f"Unknown prompt: {name}",
-            messages=[
-                PromptMessage(
-                    role="user",
-                    content=TextContent(
-                        type="text",
-                        text=f"Prompt template '{name}' not found.",
-                    ),
-                )
-            ],
-        )
-
-# ============================================================================
-# SERVER STARTUP
-# ============================================================================
-async def main():
-    """Start the MCP server on stdio (standard input/output)."""
-    # stdio_server() handles the MCP protocol over stdin/stdout
-    # This is how Claude Desktop communicates with this server
-    async with stdio_server() as (reader, writer):
-        # server.run() starts listening for requests from Claude Desktop
-        await server.run(reader, writer, server.create_initialization_options())
 
 if __name__ == "__main__":
-    # Run the async server
-    asyncio.run(main())
+    mcp.run()

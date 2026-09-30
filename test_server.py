@@ -1,454 +1,197 @@
 #!/usr/bin/env python3
-"""Test suite for MCP server tools and resources."""
+"""Test suite for the FastMCP server: tools, resources, and prompts."""
 
 import json
-import pytest
-import asyncio
-from pathlib import Path
-from datetime import datetime
-from unittest.mock import patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from server import (
-    save_memory_tool,
-    load_memory_tool,
-    get_time_tool,
-    calculate_tool,
-    get_weather_tool,
-    read_resource,
-    list_tools,
-    list_resources,
-    list_prompts,
-    get_prompt,
-    load_memory,
-    save_memory,
-    MEMORY_FILE,
-)
+import httpx2
+import pytest
+
+import server
+from server import mcp
+from mcp.server.mcpserver.exceptions import ToolError
+from resources import memory_store
 
 
 @pytest.fixture(autouse=True)
-def cleanup_memory():
-    """Clean up memory.json before and after each test."""
-    if MEMORY_FILE.exists():
-        MEMORY_FILE.unlink()
-    yield
-    if MEMORY_FILE.exists():
-        MEMORY_FILE.unlink()
+def tmp_memory(tmp_path, monkeypatch):
+    """Point the memory store at a temp file so tests never touch the real memory.json."""
+    monkeypatch.setattr(memory_store, "MEMORY_FILE", tmp_path / "memory.json")
+
+
+async def call(name, **args):
+    result = await mcp.call_tool(name, args)
+    return result.content[0].text, result.is_error
+
+
+async def read(uri):
+    return list(await mcp.read_resource(uri))[0].content
+
+
+async def prompt_text(name, **args):
+    result = await mcp.get_prompt(name, args)
+    return result.messages[0].content.text
 
 
 # ============================================================================
-# TOOL TESTS
+# TOOLS
 # ============================================================================
+class TestMemoryTools:
+    async def test_save_and_load(self):
+        text, err = await call("save_memory", key="k", value="v")
+        assert text == "Saved k" and not err
+        text, _ = await call("load_memory")
+        assert json.loads(text) == {"k": "v"}
 
-class TestSaveMemoryTool:
-    """Test the save_memory tool."""
+    async def test_save_overwrites_and_accumulates(self):
+        await call("save_memory", key="a", value="1")
+        await call("save_memory", key="b", value="2")
+        await call("save_memory", key="a", value="3")
+        text, _ = await call("load_memory")
+        assert json.loads(text) == {"a": "3", "b": "2"}
 
-    @pytest.mark.asyncio
-    async def test_save_single_key(self):
-        """Save a single key-value pair."""
-        result = await save_memory_tool({"key": "test_key", "value": "test_value"})
-        assert result == "Saved test_key"
-        assert load_memory() == {"test_key": "test_value"}
+    async def test_load_empty(self):
+        text, _ = await call("load_memory")
+        assert json.loads(text) == {}
 
-    @pytest.mark.asyncio
-    async def test_save_multiple_keys(self):
-        """Save multiple key-value pairs."""
-        await save_memory_tool({"key": "key1", "value": "value1"})
-        await save_memory_tool({"key": "key2", "value": "value2"})
-        mem = load_memory()
-        assert mem == {"key1": "value1", "key2": "value2"}
-
-    @pytest.mark.asyncio
-    async def test_overwrite_existing_key(self):
-        """Overwrite an existing key."""
-        await save_memory_tool({"key": "name", "value": "Alice"})
-        result = await save_memory_tool({"key": "name", "value": "Bob"})
-        assert result == "Saved name"
-        assert load_memory() == {"name": "Bob"}
+    async def test_missing_argument_raises(self):
+        with pytest.raises(ToolError):
+            await call("save_memory", key="only_key")
 
 
-class TestLoadMemoryTool:
-    """Test the load_memory tool."""
+class TestGetTime:
+    async def test_returns_iso_timestamp(self):
+        from datetime import datetime
 
-    @pytest.mark.asyncio
-    async def test_load_empty_memory(self):
-        """Load from empty memory file."""
-        result = await load_memory_tool({})
-        assert result == "{}"
-
-    @pytest.mark.asyncio
-    async def test_load_existing_memory(self):
-        """Load existing memory data."""
-        save_memory({"key1": "value1", "key2": "value2"})
-        result = await load_memory_tool({})
-        data = json.loads(result)
-        assert data == {"key1": "value1", "key2": "value2"}
+        text, err = await call("get_time")
+        assert not err
+        datetime.fromisoformat(text)
 
 
-class TestGetTimeTool:
-    """Test the get_time tool."""
+class TestCalculate:
+    @pytest.mark.parametrize(
+        "op,expected",
+        [("add", 14.0), ("subtract", 6.0), ("multiply", 40.0), ("divide", 2.5)],
+    )
+    async def test_operations(self, op, expected):
+        text, err = await call("calculate", a=10, b=4, operation=op)
+        assert not err
+        assert text == f"10.0 {op} 4.0 = {expected}"
 
-    @pytest.mark.asyncio
-    async def test_get_time_format(self):
-        """Check that get_time returns valid ISO format."""
-        result = await get_time_tool({})
-        # Should be parseable as ISO format datetime
-        parsed = datetime.fromisoformat(result)
-        assert isinstance(parsed, datetime)
+    async def test_divide_by_zero(self):
+        text, err = await call("calculate", a=1, b=0, operation="divide")
+        assert text == "Cannot divide by zero." and not err
 
-    @pytest.mark.asyncio
-    async def test_get_time_roughly_current(self):
-        """Check that returned time is roughly current."""
-        before = datetime.now()
-        result = await get_time_tool({})
-        after = datetime.now()
-        parsed = datetime.fromisoformat(result)
-        assert before <= parsed <= after
+    async def test_invalid_operation_rejected(self):
+        with pytest.raises(ToolError):
+            await call("calculate", a=1, b=2, operation="power")
 
 
-class TestCalculateTool:
-    """Test the calculate tool."""
-
-    @pytest.mark.asyncio
-    async def test_add(self):
-        """Test addition."""
-        result = await calculate_tool({"a": 10, "b": 5, "operation": "add"})
-        assert "10" in result and "add" in result and "15" in result
-
-    @pytest.mark.asyncio
-    async def test_subtract(self):
-        """Test subtraction."""
-        result = await calculate_tool({"a": 10, "b": 3, "operation": "subtract"})
-        assert "10" in result and "subtract" in result and "7" in result
-
-    @pytest.mark.asyncio
-    async def test_multiply(self):
-        """Test multiplication."""
-        result = await calculate_tool({"a": 6, "b": 7, "operation": "multiply"})
-        assert "6" in result and "multiply" in result and "42" in result
-
-    @pytest.mark.asyncio
-    async def test_divide(self):
-        """Test division."""
-        result = await calculate_tool({"a": 20, "b": 4, "operation": "divide"})
-        assert "20" in result and "divide" in result and "5" in result
-
-    @pytest.mark.asyncio
-    async def test_divide_with_floats(self):
-        """Test division with decimal result."""
-        result = await calculate_tool({"a": 10, "b": 3, "operation": "divide"})
-        assert "10" in result and "divide" in result
-        # Should contain approximately 3.333...
-        assert "3.333" in result or "3.33" in result
+WEATHER_JSON = {
+    "current_condition": [
+        {
+            "weatherDesc": [{"value": "Sunny "}],
+            "temp_C": "21",
+            "FeelsLikeC": "20",
+            "humidity": "40",
+            "windspeedKmph": "10",
+        }
+    ],
+    "nearest_area": [{"areaName": [{"value": "London"}], "country": [{"value": "UK"}]}],
+}
 
 
-class TestGetWeatherTool:
-    """Test the get_weather tool."""
-
-    @pytest.mark.asyncio
-    async def test_get_weather_invalid_city(self):
-        """Test weather for non-existent city."""
-        result = await get_weather_tool({"city": "InvalidCityXYZ123"})
-        assert "Could not find" in result or "unreachable" in result
-
-    @pytest.mark.asyncio
-    async def test_get_weather_real_city(self):
-        """Test weather fetch for a real city (requires network)."""
-        # This test hits the real wttr.in API to verify format
-        result = await get_weather_tool({"city": "London"})
-        # Should not have error messages
-        assert "Could not find" not in result
-        assert "unreachable" not in result
-        # Should contain weather data
-        assert "London" in result or "," in result  # City name or location format
+def mock_client(get_side_effect=None, response=None):
+    client = MagicMock()
+    client.get = AsyncMock(side_effect=get_side_effect, return_value=response)
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=client)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    return cm
 
 
-# ============================================================================
-# RESOURCE TESTS
-# ============================================================================
+class TestGetWeather:
+    async def test_success(self):
+        resp = MagicMock()
+        resp.json.return_value = WEATHER_JSON
+        with patch.object(server.httpx2, "AsyncClient", return_value=mock_client(response=resp)):
+            text, err = await call("get_weather", city="London")
+        assert not err
+        assert text == "London, UK: Sunny, 21C (feels like 20C), humidity 40%, wind 10 km/h"
 
-class TestListResources:
-    """Test resource advertisement."""
+    async def test_unknown_city(self):
+        resp = MagicMock()
+        resp.raise_for_status.side_effect = httpx2.HTTPStatusError("404", request=MagicMock(), response=MagicMock())
+        with patch.object(server.httpx2, "AsyncClient", return_value=mock_client(response=resp)):
+            text, _ = await call("get_weather", city="Nowhere")
+        assert text == "Could not find weather for 'Nowhere'."
 
-    @pytest.mark.asyncio
-    async def test_list_resources_count(self):
-        """Check that correct number of resources are advertised."""
-        resources = await list_resources()
-        assert len(resources) == 3
+    async def test_service_unreachable(self):
+        err = httpx2.ConnectError("boom")
+        with patch.object(server.httpx2, "AsyncClient", return_value=mock_client(get_side_effect=err)):
+            text, _ = await call("get_weather", city="London")
+        assert text.startswith("Weather service unreachable")
 
-    @pytest.mark.asyncio
-    async def test_list_resources_uris(self):
-        """Check that all expected resource URIs are present."""
-        resources = await list_resources()
-        uris = [r["uri"] for r in resources]
-        assert "memory://data" in uris
-        assert "file://memory.json" in uris
-        assert "status://server" in uris
-
-    @pytest.mark.asyncio
-    async def test_list_resources_have_descriptions(self):
-        """Check that all resources have descriptions."""
-        resources = await list_resources()
-        for resource in resources:
-            assert "description" in resource
-            assert len(resource["description"]) > 0
-
-
-class TestReadResource:
-    """Test reading resources."""
-
-    @pytest.mark.asyncio
-    async def test_read_memory_data_empty(self):
-        """Read memory://data when empty."""
-        result = await read_resource("memory://data")
-        assert result == "{}"
-
-    @pytest.mark.asyncio
-    async def test_read_memory_data_with_content(self):
-        """Read memory://data with existing content."""
-        save_memory({"key1": "value1", "key2": "value2"})
-        result = await read_resource("memory://data")
-        data = json.loads(result)
-        assert data == {"key1": "value1", "key2": "value2"}
-
-    @pytest.mark.asyncio
-    async def test_read_file_memory_json(self):
-        """Read file://memory.json resource."""
-        save_memory({"project": "MCP"})
-        result = await read_resource("file://memory.json")
-        data = json.loads(result)
-        assert data == {"project": "MCP"}
-
-    @pytest.mark.asyncio
-    async def test_read_file_memory_json_with_trailing_slash(self):
-        """Read file://memory.json/ (with trailing slash)."""
-        save_memory({"test": "data"})
-        result = await read_resource("file://memory.json/")
-        data = json.loads(result)
-        assert data == {"test": "data"}
-
-    @pytest.mark.asyncio
-    async def test_read_status_server(self):
-        """Read status://server resource."""
-        save_memory({"entry1": "value1"})
-        result = await read_resource("status://server")
-        assert "MCP Server Status" in result
-        assert "simple-mcp-server" in result
-        assert "Running" in result
-        assert "Entries: 1" in result
-
-    @pytest.mark.asyncio
-    async def test_read_status_server_empty_memory(self):
-        """Read status://server with no memory entries."""
-        result = await read_resource("status://server")
-        assert "Entries: 0" in result
-        assert "none" in result
-
-    @pytest.mark.asyncio
-    async def test_read_unknown_resource(self):
-        """Read non-existent resource."""
-        result = await read_resource("unknown://resource")
-        assert "Unknown resource" in result
-
-
-# ============================================================================
-# TOOL ADVERTISEMENT TESTS
-# ============================================================================
 
 class TestListTools:
-    """Test tool advertisement."""
-
-    @pytest.mark.asyncio
-    async def test_list_tools_count(self):
-        """Check that correct number of tools are advertised."""
-        tools = await list_tools()
-        assert len(tools) == 5
-
-    @pytest.mark.asyncio
-    async def test_list_tools_names(self):
-        """Check that all expected tools are present."""
-        tools = await list_tools()
-        names = [t["name"] for t in tools]
-        assert "save_memory" in names
-        assert "load_memory" in names
-        assert "get_time" in names
-        assert "calculate" in names
-        assert "get_weather" in names
-
-    @pytest.mark.asyncio
-    async def test_tools_have_descriptions(self):
-        """Check that all tools have descriptions."""
-        tools = await list_tools()
-        for tool in tools:
-            assert "description" in tool
-            assert len(tool["description"]) > 0
-
-    @pytest.mark.asyncio
-    async def test_tools_have_input_schema(self):
-        """Check that all tools have input schemas."""
-        tools = await list_tools()
-        for tool in tools:
-            assert "inputSchema" in tool
-            assert "type" in tool["inputSchema"]
-
-    @pytest.mark.asyncio
-    async def test_calculate_tool_schema_operations(self):
-        """Check that calculate tool lists valid operations."""
-        tools = await list_tools()
-        calc_tool = next(t for t in tools if t["name"] == "calculate")
-        operations = calc_tool["inputSchema"]["properties"]["operation"]["enum"]
-        assert set(operations) == {"add", "subtract", "multiply", "divide"}
+    async def test_tool_names_and_schemas(self):
+        tools = {t.name: t for t in await mcp.list_tools()}
+        assert set(tools) == {"save_memory", "load_memory", "get_time", "calculate", "get_weather"}
+        assert tools["save_memory"].input_schema["required"] == ["key", "value"]
+        assert tools["calculate"].input_schema["properties"]["operation"]["enum"] == [
+            "add", "subtract", "multiply", "divide",
+        ]
+        assert all(t.description for t in tools.values())
 
 
 # ============================================================================
-# PROMPT ADVERTISEMENT AND CONTENT TESTS
+# RESOURCES
 # ============================================================================
+class TestResources:
+    async def test_list(self):
+        uris = {str(r.uri) for r in await mcp.list_resources()}
+        assert uris == {"memory://data", "file://memory.json", "status://server"}
 
-class TestListPrompts:
-    """Test prompt template advertisement."""
+    @pytest.mark.parametrize("uri", ["memory://data", "file://memory.json"])
+    async def test_memory_resources_match_saved_data(self, uri):
+        await call("save_memory", key="k", value="v")
+        assert json.loads(await read(uri)) == {"k": "v"}
 
-    @pytest.mark.asyncio
-    async def test_list_prompts_count(self):
-        """Check that correct number of prompts are advertised."""
-        prompts = await list_prompts()
-        assert len(prompts) == 2
+    async def test_status_reports_memory(self):
+        await call("save_memory", key="alpha", value="1")
+        status = await read("status://server")
+        assert "Server: simple-mcp-server" in status
+        assert "Entries: 1" in status and "alpha" in status
 
-    @pytest.mark.asyncio
-    async def test_list_prompts_names(self):
-        """Check that all expected prompts are present."""
-        prompts = await list_prompts()
-        names = [p.name for p in prompts]
-        assert "weather_activity_planner" in names
-        assert "weather_alert_explainer" in names
-
-    @pytest.mark.asyncio
-    async def test_prompts_have_descriptions(self):
-        """Check that all prompts have descriptions."""
-        prompts = await list_prompts()
-        for prompt in prompts:
-            assert prompt.description
-            assert len(prompt.description) > 0
-
-    @pytest.mark.asyncio
-    async def test_prompts_have_arguments(self):
-        """Check that all prompts have arguments defined."""
-        prompts = await list_prompts()
-        for prompt in prompts:
-            assert isinstance(prompt.arguments, list)
-
-    @pytest.mark.asyncio
-    async def test_weather_activity_planner_arguments(self):
-        """Check weather_activity_planner arguments."""
-        prompts = await list_prompts()
-        planner = next(p for p in prompts if p.name == "weather_activity_planner")
-        arg_names = [a.name for a in planner.arguments]
-        assert "location" in arg_names
-        assert "activity_type" in arg_names
-        assert "time_horizon" in arg_names
-
-    @pytest.mark.asyncio
-    async def test_weather_alert_explainer_arguments(self):
-        """Check weather_alert_explainer arguments."""
-        prompts = await list_prompts()
-        explainer = next(p for p in prompts if p.name == "weather_alert_explainer")
-        arg_names = [a.name for a in explainer.arguments]
-        assert "alert_type" in arg_names
-        assert "region" in arg_names
-
-
-class TestGetPrompt:
-    """Test prompt template content generation."""
-
-    @pytest.mark.asyncio
-    async def test_get_weather_activity_planner(self):
-        """Get weather_activity_planner prompt with arguments."""
-        result = await get_prompt("weather_activity_planner", {
-            "location": "New York",
-            "activity_type": "hiking",
-            "time_horizon": "this weekend"
-        })
-        assert len(result.messages) > 0
-        content = result.messages[0].content.text
-        assert "hiking" in content
-        assert "New York" in content
-        assert "this weekend" in content
-
-    @pytest.mark.asyncio
-    async def test_get_weather_activity_planner_minimal(self):
-        """Get weather_activity_planner with only required arguments."""
-        result = await get_prompt("weather_activity_planner", {
-            "location": "London",
-            "activity_type": "picnic"
-        })
-        content = result.messages[0].content.text
-        assert "picnic" in content
-        assert "London" in content
-
-    @pytest.mark.asyncio
-    async def test_get_weather_alert_explainer(self):
-        """Get weather_alert_explainer prompt with arguments."""
-        result = await get_prompt("weather_alert_explainer", {
-            "alert_type": "severe thunderstorm",
-            "region": "Texas"
-        })
-        assert len(result.messages) > 0
-        content = result.messages[0].content.text
-        assert "severe thunderstorm" in content
-        assert "Texas" in content
-
-    @pytest.mark.asyncio
-    async def test_get_unknown_prompt(self):
-        """Get a prompt that doesn't exist."""
-        result = await get_prompt("unknown_prompt", {})
-        assert len(result.messages) > 0
-        assert "not found" in result.messages[0].content.text
-
-    @pytest.mark.asyncio
-    async def test_prompt_result_serializes_for_wire(self):
-        """Rendered prompts must validate as MCP GetPromptResult (regression guard)."""
-        from mcp.types import GetPromptResult
-
-        result = await get_prompt("weather_activity_planner", {
-            "location": "Berlin",
-            "activity_type": "biking",
-        })
-        # Round-trip through the wire format the client actually receives.
-        GetPromptResult.model_validate(result.model_dump(by_alias=True, mode="json"))
-
-    @pytest.mark.asyncio
-    async def test_get_prompt_with_none_arguments(self):
-        """Get prompt when arguments is None."""
-        result = await get_prompt("weather_activity_planner", None)
-        # Should have default values
-        content = result.messages[0].content.text
-        assert "unknown location" in content or "outdoor activity" in content
+    async def test_unknown_resource_raises(self):
+        with pytest.raises(Exception):
+            await read("nope://missing")
 
 
 # ============================================================================
-# INTEGRATION TESTS
+# PROMPTS
 # ============================================================================
+class TestPrompts:
+    async def test_list(self):
+        prompts = {p.name: p for p in await mcp.list_prompts()}
+        assert set(prompts) == {"weather_activity_planner", "weather_alert_explainer"}
+        args = {a.name: a.required for a in prompts["weather_activity_planner"].arguments}
+        assert args == {"location": True, "activity_type": True, "time_horizon": False}
 
-class TestIntegration:
-    """Integration tests combining multiple tools/resources."""
+    async def test_activity_planner(self):
+        text = await prompt_text(
+            "weather_activity_planner", location="Colorado", activity_type="hiking", time_horizon="this weekend"
+        )
+        assert "hiking in Colorado this weekend" in text
 
-    @pytest.mark.asyncio
-    async def test_save_then_load_workflow(self):
-        """Save data with tool, then read with resource."""
-        await save_memory_tool({"key": "workflow_test", "value": "integration"})
-        resource_data = await read_resource("memory://data")
-        data = json.loads(resource_data)
-        assert data["workflow_test"] == "integration"
+    async def test_activity_planner_default_horizon(self):
+        text = await prompt_text("weather_activity_planner", location="Oslo", activity_type="run")
+        assert "run in Oslo soon" in text
 
-    @pytest.mark.asyncio
-    async def test_status_reflects_memory_changes(self):
-        """Status resource should show current memory count."""
-        await save_memory_tool({"key": "item1", "value": "val1"})
-        status = await read_resource("status://server")
-        assert "Entries: 1" in status
+    async def test_alert_explainer(self):
+        text = await prompt_text("weather_alert_explainer", alert_type="heat advisory", region="Texas")
+        assert "heat advisory alert for Texas" in text
 
-        await save_memory_tool({"key": "item2", "value": "val2"})
-        status = await read_resource("status://server")
-        assert "Entries: 2" in status
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    async def test_missing_required_argument_raises(self):
+        with pytest.raises(Exception):
+            await prompt_text("weather_alert_explainer", alert_type="x")
